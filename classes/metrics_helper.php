@@ -35,26 +35,32 @@ defined('MOODLE_INTERNAL') || die();
  */
 class metrics_helper {
     /**
-     * Capture a student's metrics for a course (grade so far, engagement, social,
-     * self-regulation, feedback review). Returns null if the student has no
-     * grade record yet (treated as not-participated).
+     * Capture a student's metrics for a course: grade so far (null if no grade
+     * recorded yet), engagement, social, self-regulation, feedback review.
+     *
+     * The grade field is null when the student has no grade_grades row for the
+     * course item, when finalgrade is null, or when no course grade item exists
+     * yet. In-progress callers should still persist these rows; post-course
+     * callers should treat grade === null as "did not participate" and skip.
      *
      * @param int $courseid Course ID.
      * @param int $userid Student user ID.
-     * @param object $courseitem The course grade item record.
-     * @return array|null ['grade', 'engagement', 'social', 'selfregulation', 'feedbackpct']
+     * @param object|null $courseitem The course grade item, or null if absent.
+     * @return array ['grade' => float|null, 'engagement', 'social', 'selfregulation', 'feedbackpct']
      */
-    public static function capture_student_metrics(int $courseid, int $userid, object $courseitem): ?array {
+    public static function capture_student_metrics(int $courseid, int $userid, ?object $courseitem): array {
         global $DB;
 
-        $gg = $DB->get_record('grade_grades', [
-            'itemid' => $courseitem->id,
-            'userid' => $userid,
-        ]);
-        if (!$gg || $gg->finalgrade === null) {
-            return null;
+        $grade = null;
+        if ($courseitem && (float)$courseitem->grademax > 0) {
+            $gg = $DB->get_record('grade_grades', [
+                'itemid' => $courseitem->id,
+                'userid' => $userid,
+            ]);
+            if ($gg && $gg->finalgrade !== null) {
+                $grade = round(((float)$gg->finalgrade / (float)$courseitem->grademax) * 100, 2);
+            }
         }
-        $grade = round(((float)$gg->finalgrade / (float)$courseitem->grademax) * 100, 2);
 
         // Engagement: distinct activities viewed.
         $totalactivities = (int)$DB->count_records_sql(

@@ -41,6 +41,37 @@ class filter_helper {
     }
 
     /**
+     * Build a SQL fragment that restricts a query to courses inside the
+     * site-wide "Limit course matching to category" admin setting (category id
+     * + its descendants).
+     *
+     * Returns ['', []] when no category is configured (i.e. "All categories"),
+     * so callers can append the fragment unconditionally.
+     *
+     * @param string $coursealias SQL alias for the {course} table in the caller's query (default 'c').
+     * @param string $paramprefix Prefix for named bind params to avoid collisions (default 'cscope').
+     * @return array [string sqlfragment, array params] e.g. [" AND c.category IN (:cscope0, :cscope1)", ['cscope0' => 12, ...]].
+     */
+    public static function get_category_scope_sql(string $coursealias = 'c', string $paramprefix = 'cscope'): array {
+        global $DB;
+
+        $categoryid = (int)get_config('local_coifish', 'course_category');
+        if ($categoryid <= 0) {
+            return ['', []];
+        }
+
+        $cat = \core_course_category::get($categoryid, IGNORE_MISSING);
+        if (!$cat) {
+            return ['', []];
+        }
+
+        $catids = array_merge([$categoryid], $cat->get_all_children_ids());
+        [$insql, $params] = $DB->get_in_or_equal($catids, SQL_PARAMS_NAMED, $paramprefix);
+        $fragment = " AND {$coursealias}.category {$insql}";
+        return [$fragment, $params];
+    }
+
+    /**
      * Get role IDs that represent a teaching role.
      *
      * Reads from the admin setting where the user selects which roles

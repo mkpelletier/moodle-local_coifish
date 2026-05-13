@@ -56,17 +56,30 @@ class build_active_snapshots extends scheduled_task {
         }
 
         $now = time();
+        [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c');
         $courses = $DB->get_records_sql(
             "SELECT c.id, c.fullname, c.category, c.startdate, c.enddate
                FROM {course} c
               WHERE c.id != :siteid
                 AND c.visible = 1
-                AND (c.enddate = 0 OR c.enddate > :now)",
-            ['siteid' => SITEID, 'now' => $now]
+                AND (c.enddate = 0 OR c.enddate > :now)
+                $catfrag",
+            array_merge(['siteid' => SITEID, 'now' => $now], $catparams)
         );
 
         foreach ($courses as $course) {
             $this->refresh_course($course, $now);
+        }
+
+        // Delete snapshot rows whose course is no longer in scope (course
+        // hidden, ended, deleted, or now outside the configured category).
+        // Per-course unenrolment cleanup happens inside refresh_course().
+        $courseids = array_keys($courses);
+        if (empty($courseids)) {
+            $DB->delete_records('local_coifish_active_snapshot');
+        } else {
+            [$insql, $inparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'kc', false);
+            $DB->delete_records_select('local_coifish_active_snapshot', "courseid $insql", $inparams);
         }
     }
 
@@ -85,21 +98,30 @@ class build_active_snapshots extends scheduled_task {
         }
 
         $students = get_enrolled_users($context, 'moodle/course:isincompletionreports', 0, 'u.id');
-        if (empty($students)) {
+        $studentids = array_keys($students);
+
+        // Remove snapshot rows for users no longer actively enrolled in this course.
+        if (empty($studentids)) {
+            $DB->delete_records('local_coifish_active_snapshot', ['courseid' => $course->id]);
             return;
         }
+        [$insql, $inparams] = $DB->get_in_or_equal($studentids, SQL_PARAMS_NAMED, 'su', false);
+        $DB->delete_records_select(
+            'local_coifish_active_snapshot',
+            "courseid = :cid AND userid $insql",
+            array_merge(['cid' => $course->id], $inparams)
+        );
 
+        // Course grade item may not exist yet on brand-new courses; capture_student_metrics
+        // handles a missing item by leaving grade null.
         $courseitem = $DB->get_record('grade_items', [
             'courseid' => $course->id,
             'itemtype' => 'course',
-        ]);
-        if (!$courseitem || $courseitem->grademax <= 0) {
-            return;
-        }
+        ]) ?: null;
 
         $termlabel = metrics_helper::resolve_term_label($course);
 
-        foreach (array_keys($students) as $userid) {
+        foreach ($studentids as $userid) {
             self::refresh_one($course, $userid, $courseitem, $termlabel, $now);
         }
     }
@@ -127,21 +149,17 @@ class build_active_snapshots extends scheduled_task {
 
         $now = $now ?? time();
 
+        // Look up the course grade item once if the caller didn't pre-fetch it.
+        // A missing/zero item just means we'll record null grade — engagement,
+        // social, self-regulation and feedback metrics are still meaningful.
         if ($courseitem === null) {
             $courseitem = $DB->get_record('grade_items', [
                 'courseid' => $course->id,
                 'itemtype' => 'course',
-            ]);
-            if (!$courseitem || $courseitem->grademax <= 0) {
-                return false;
-            }
+            ]) ?: null;
         }
 
         $metrics = metrics_helper::capture_student_metrics((int)$course->id, $userid, $courseitem);
-        if ($metrics === null) {
-            // No grade record yet — keep any existing row but don't write a stub.
-            return false;
-        }
 
         if ($termlabel === null) {
             $termlabel = metrics_helper::resolve_term_label($course);

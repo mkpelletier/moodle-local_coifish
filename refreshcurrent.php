@@ -45,6 +45,7 @@ $throttle = 3600; // 1 hour per course.
 $now = time();
 
 // Active enrolled courses for this student.
+[$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c');
 $courses = $DB->get_records_sql(
     "SELECT DISTINCT c.id, c.fullname, c.shortname, c.category, c.startdate, c.enddate
        FROM {user_enrolments} ue
@@ -56,21 +57,24 @@ $courses = $DB->get_records_sql(
         AND (ue.timestart = 0 OR ue.timestart <= :now2)
         AND c.id != :siteid
         AND c.visible = 1
-        AND (c.enddate = 0 OR c.enddate > :now3)",
-    [
+        AND (c.enddate = 0 OR c.enddate > :now3)
+        $catfrag",
+    array_merge([
         'uid' => $userid,
         'now1' => $now,
         'now2' => $now,
         'now3' => $now,
         'siteid' => SITEID,
-    ]
+    ], $catparams)
 );
 
 $refreshed = 0;
 $skipped = 0;
 $nodata = 0;
+$inscopeids = [];
 
 foreach ($courses as $course) {
+    $inscopeids[] = (int)$course->id;
     $existing = $DB->get_record('local_coifish_active_snapshot', [
         'userid' => $userid,
         'courseid' => $course->id,
@@ -89,10 +93,31 @@ foreach ($courses as $course) {
     }
 }
 
-$a = (object)['refreshed' => $refreshed, 'skipped' => $skipped, 'nodata' => $nodata];
-if ($refreshed === 0 && $skipped > 0) {
+// Remove rows for courses the student is no longer actively enrolled in (or
+// that have fallen out of scope: hidden, ended, or excluded by category).
+$removed = 0;
+if (empty($inscopeids)) {
+    $removed = $DB->count_records('local_coifish_active_snapshot', ['userid' => $userid]);
+    $DB->delete_records('local_coifish_active_snapshot', ['userid' => $userid]);
+} else {
+    [$insql, $inparams] = $DB->get_in_or_equal($inscopeids, SQL_PARAMS_NAMED, 'rk', false);
+    $select = "userid = :uid AND courseid $insql";
+    $removed = $DB->count_records_select(
+        'local_coifish_active_snapshot',
+        $select,
+        array_merge(['uid' => $userid], $inparams)
+    );
+    $DB->delete_records_select(
+        'local_coifish_active_snapshot',
+        $select,
+        array_merge(['uid' => $userid], $inparams)
+    );
+}
+
+$a = (object)['refreshed' => $refreshed, 'skipped' => $skipped, 'nodata' => $nodata, 'removed' => $removed];
+if ($refreshed === 0 && $skipped > 0 && $removed === 0) {
     \core\notification::info(get_string('refresh_throttled', 'local_coifish', $a));
-} else if ($refreshed === 0 && $nodata === 0 && $skipped === 0) {
+} else if ($refreshed === 0 && $nodata === 0 && $skipped === 0 && $removed === 0) {
     \core\notification::info(get_string('refresh_none', 'local_coifish'));
 } else {
     \core\notification::success(get_string('refresh_done', 'local_coifish', $a));

@@ -167,6 +167,7 @@ class api {
         // Current-enrolment filter. Sources the truth from user_enrolments + course
         // directly so the filter works even before the active-snapshot task has run.
         if ($enrolstatus === 'current' || $enrolstatus === 'notenrolled') {
+            [$cescopefrag, $cescopeparams] = \local_coifish\filter_helper::get_category_scope_sql('ce_c', 'ce_cat');
             $existssql = "EXISTS (
                 SELECT 1
                   FROM {user_enrolments} ce_ue
@@ -179,6 +180,7 @@ class api {
                    AND ce_c.id != :ce_siteid
                    AND ce_c.visible = 1
                    AND (ce_c.enddate = 0 OR ce_c.enddate > :ce_now3)
+                   $cescopefrag
             )";
             $conditions[] = ($enrolstatus === 'current') ? $existssql : "NOT $existssql";
             $now = time();
@@ -186,6 +188,7 @@ class api {
             $params['ce_now2'] = $now;
             $params['ce_now3'] = $now;
             $params['ce_siteid'] = SITEID;
+            $params = array_merge($params, $cescopeparams);
         }
 
         $namefields = \core_user\fields::for_name()->get_sql('u')->selects;
@@ -267,6 +270,7 @@ class api {
         global $DB;
 
         $now = time();
+        [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c');
         $rows = $DB->get_records_sql(
             "SELECT acs.*, c.fullname AS coursename, c.category AS coursecategory,
                     c.startdate AS coursestart, c.enddate AS courseend
@@ -275,8 +279,9 @@ class api {
               WHERE acs.userid = :userid
                 AND c.visible = 1
                 AND (c.enddate = 0 OR c.enddate > :now)
+                $catfrag
            ORDER BY c.startdate DESC, c.fullname ASC",
-            ['userid' => $userid, 'now' => $now]
+            array_merge(['userid' => $userid, 'now' => $now], $catparams)
         );
 
         $result = [];

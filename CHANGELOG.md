@@ -5,6 +5,11 @@
 ### Added
 - **Enrolment-status filter on Student Risk Overview** — new dropdown with three options: "Currently enrolled" (default), "All", and "No current enrolment". Reduces noise from students on a study break, and surfaces re-engagement opportunities. Sourced directly from `user_enrolments` so it works even before the active-snapshot task has run.
 
+### Fixed
+- **Empty Current Enrolments card for new-term students** — `capture_student_metrics` now returns a row with `grade = null` (instead of bailing out) when a student has no `grade_grades` entry yet or when the course has no `grade_items` row of type `course`. The active-snapshot task and the on-demand refresh both write the row in this case. Post-course `build_profiles` continues to skip students without a final grade.
+- **Non-academic courses leaking into current-enrolment queries** — the existing `local_coifish/course_category` "Limit course matching to category" admin setting is now honoured by the active-snapshot task, the on-demand refresh, the Current Enrolments display, and the "Currently enrolled" filter on the Risk Overview. A new helper `filter_helper::get_category_scope_sql()` centralises the include logic.
+- **Stale active-snapshot rows after withdrawal or scope change** — both the on-demand refresh and the daily task now delete `local_coifish_active_snapshot` rows for students who have withdrawn from a course, and for courses that have fallen out of scope (now hidden, ended, deleted, or excluded by category). The on-demand refresh notification reports how many stale entries were removed.
+
 ## [1.3.1] - 2026-05-13
 
 ### Security
