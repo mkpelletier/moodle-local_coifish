@@ -34,8 +34,6 @@ use core_privacy\local\request\contextlist;
 use core_privacy\local\request\userlist;
 use core_privacy\local\request\writer;
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * Implementation of the privacy subsystem plugin provider for local_coifish.
  */
@@ -43,12 +41,14 @@ class provider implements
     \core_privacy\local\metadata\provider,
     \core_privacy\local\request\core_userlist_provider,
     \core_privacy\local\request\plugin\provider {
-
     /**
      * Tables in which local_coifish stores user-keyed data.
      *
      * All four are keyed by user id at the system level (no per-course context),
      * so we attach them to the system context for the purposes of the privacy API.
+     *
+     * @param collection $collection The metadata collection to populate.
+     * @return collection The same collection with this plugin's tables added.
      */
     public static function get_metadata(collection $collection): collection {
         $collection->add_database_table(
@@ -119,6 +119,9 @@ class provider implements
     /**
      * Locate contexts where the user has data. All tables are system-scoped,
      * so we return the system context if any of them holds a row for the user.
+     *
+     * @param int $userid The user to look up.
+     * @return contextlist Contexts containing data for the user.
      */
     public static function get_contexts_for_userid(int $userid): contextlist {
         $contextlist = new contextlist();
@@ -146,6 +149,8 @@ class provider implements
 
     /**
      * Locate users who have data in a given context. Only the system context applies.
+     *
+     * @param userlist $userlist The userlist to populate.
      */
     public static function get_users_in_context(userlist $userlist): void {
         $context = $userlist->get_context();
@@ -153,12 +158,13 @@ class provider implements
             return;
         }
 
-        foreach ([
+        $tables = [
             'local_coifish_profile',
             'local_coifish_course_snapshot',
             'local_coifish_active_snapshot',
             'local_coifish_lecturer',
-        ] as $table) {
+        ];
+        foreach ($tables as $table) {
             $userlist->add_from_sql('userid', "SELECT userid FROM {{$table}}", []);
         }
     }
@@ -166,6 +172,8 @@ class provider implements
     /**
      * Export user data from the four tables, grouped under the plugin name
      * at the system context.
+     *
+     * @param approved_contextlist $contextlist The approved contexts to export from.
      */
     public static function export_user_data(approved_contextlist $contextlist): void {
         global $DB;
@@ -175,15 +183,16 @@ class provider implements
         }
 
         $userid = $contextlist->get_user()->id;
-        $hasSystem = false;
+        $hassystem = false;
+        $syscontext = null;
         foreach ($contextlist->get_contexts() as $context) {
             if ($context->contextlevel === CONTEXT_SYSTEM) {
-                $hasSystem = true;
+                $hassystem = true;
                 $syscontext = $context;
                 break;
             }
         }
-        if (!$hasSystem) {
+        if (!$hassystem) {
             return;
         }
 
@@ -220,6 +229,8 @@ class provider implements
      * Delete all user data in the given context. Because the plugin's data is
      * system-scoped per-user, this is only invoked for system context with the
      * effect of wiping every row in all four tables.
+     *
+     * @param \context $context The context to delete data for.
      */
     public static function delete_data_for_all_users_in_context(\context $context): void {
         global $DB;
@@ -234,6 +245,8 @@ class provider implements
 
     /**
      * Delete all data for the given user across the system context.
+     *
+     * @param approved_contextlist $contextlist The approved contexts to delete from.
      */
     public static function delete_data_for_user(approved_contextlist $contextlist): void {
         global $DB;
@@ -251,6 +264,8 @@ class provider implements
 
     /**
      * Delete data for an approved userlist (system context only).
+     *
+     * @param approved_userlist $userlist The approved user list.
      */
     public static function delete_data_for_users(approved_userlist $userlist): void {
         global $DB;
@@ -263,12 +278,13 @@ class provider implements
             return;
         }
         [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
-        foreach ([
+        $tables = [
             'local_coifish_profile',
             'local_coifish_course_snapshot',
             'local_coifish_active_snapshot',
             'local_coifish_lecturer',
-        ] as $table) {
+        ];
+        foreach ($tables as $table) {
             $DB->delete_records_select($table, "userid $insql", $params);
         }
     }
@@ -276,16 +292,17 @@ class provider implements
     /**
      * Remove the four tables' rows for a single user.
      *
-     * @param int $userid
+     * @param int $userid The user whose rows to delete.
      */
     protected static function delete_user_rows(int $userid): void {
         global $DB;
-        foreach ([
+        $tables = [
             'local_coifish_profile',
             'local_coifish_course_snapshot',
             'local_coifish_active_snapshot',
             'local_coifish_lecturer',
-        ] as $table) {
+        ];
+        foreach ($tables as $table) {
             $DB->delete_records($table, ['userid' => $userid]);
         }
     }

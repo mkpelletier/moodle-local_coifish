@@ -25,8 +25,6 @@
 
 namespace local_coifish;
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * Static helpers for per-student per-course metric capture and term resolution.
  *
