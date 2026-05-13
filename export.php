@@ -42,6 +42,7 @@ if (!$iscoordinator) {
 
 // If download requested, generate CSV and exit.
 if ($download && !empty($datefrom) && !empty($dateto)) {
+    require_sesskey();
     $timefrom = strtotime($datefrom);
     $timeto = strtotime($dateto . ' 23:59:59');
 
@@ -116,6 +117,7 @@ echo '</div>';
 
 echo '<form method="get" action="' . (new moodle_url('/local/coifish/export.php'))->out(true) . '">';
 echo '<input type="hidden" name="download" value="1">';
+echo '<input type="hidden" name="sesskey" value="' . s(sesskey()) . '">';
 
 // Cohort filter for cohort mode.
 $mode = \local_coifish\filter_helper::get_mode();

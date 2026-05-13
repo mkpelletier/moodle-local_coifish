@@ -15,6 +15,10 @@
     * hasrecommendations (bool) - Whether recommendations exist.
     * history (array) - Course snapshot history array.
     * hashistory (bool) - Whether course history exists.
+    * current (array) - Current (in-progress) enrolment rows.
+    * hascurrent (bool) - Whether current enrolment rows exist.
+    * freshnesslabel (string) - Caption indicating how fresh the active snapshot data is.
+    * refreshurl (string) - URL for the on-demand active-snapshot refresh.
     * backurl (string) - URL back to the risk overview.
 
     Example context (json):
@@ -152,6 +156,70 @@
     </div>
     {{/hasrecommendations}}
 
+    {{! Current enrolments }}
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h5 class="mb-0">
+                <i class="fa fa-graduation-cap me-1" aria-hidden="true"></i>
+                {{#str}}drilldown_current_enrolments, local_coifish{{/str}}
+            </h5>
+            <div class="small text-muted d-flex align-items-center gap-2">
+                <span>{{freshnesslabel}}</span>
+                <a href="{{refreshurl}}" class="btn btn-sm btn-outline-secondary">
+                    <i class="fa fa-refresh me-1" aria-hidden="true"></i>
+                    {{#str}}refresh_now, local_coifish{{/str}}
+                </a>
+            </div>
+        </div>
+        {{#hascurrent}}
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>{{#str}}col_course_name, local_coifish{{/str}}</th>
+                            <th>{{#str}}col_term, local_coifish{{/str}}</th>
+                            <th>{{#str}}col_start, local_coifish{{/str}}</th>
+                            <th>{{#str}}col_end, local_coifish{{/str}}</th>
+                            <th class="text-center">{{#str}}col_grade_so_far, local_coifish{{/str}}</th>
+                            <th class="text-center">{{#str}}col_engagement, local_coifish{{/str}}</th>
+                            <th class="text-center">{{#str}}col_social, local_coifish{{/str}}</th>
+                            <th class="text-center">{{#str}}col_selfregulation, local_coifish{{/str}}</th>
+                            <th class="text-center">{{#str}}col_feedback, local_coifish{{/str}}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{#current}}
+                        <tr>
+                            <td><a href="{{viewurl}}" target="_blank" rel="noopener">{{coursename}}</a></td>
+                            <td>{{termlabel}}</td>
+                            <td class="text-nowrap">{{coursestartformatted}}</td>
+                            <td class="text-nowrap">{{courseendformatted}}</td>
+                            <td class="text-center">
+                                {{#currentgrade}}{{currentgrade}}%{{/currentgrade}}
+                                {{^currentgrade}}<span class="text-muted">-</span>{{/currentgrade}}
+                            </td>
+                            <td class="text-center">{{#engagement}}{{engagement}}%{{/engagement}}{{^engagement}}<span class="text-muted">-</span>{{/engagement}}</td>
+                            <td class="text-center">{{#social}}{{social}}%{{/social}}{{^social}}<span class="text-muted">-</span>{{/social}}</td>
+                            <td class="text-center">{{#selfregulation}}{{selfregulation}}%{{/selfregulation}}{{^selfregulation}}<span class="text-muted">-</span>{{/selfregulation}}</td>
+                            <td class="text-center">{{#feedbackpct}}{{feedbackpct}}%{{/feedbackpct}}{{^feedbackpct}}<span class="text-muted">-</span>{{/feedbackpct}}</td>
+                        </tr>
+                        {{/current}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{/hascurrent}}
+        {{^hascurrent}}
+        <div class="card-body">
+            <div class="text-muted small mb-0">
+                <i class="fa fa-info-circle me-1" aria-hidden="true"></i>
+                {{#str}}drilldown_no_current_enrolments, local_coifish{{/str}}
+            </div>
+        </div>
+        {{/hascurrent}}
+    </div>
+
     {{! Course history }}
     {{#hashistory}}
     <div class="card">
@@ -167,6 +235,7 @@
                     <thead class="table-light">
                         <tr>
                             <th>{{#str}}col_course_name, local_coifish{{/str}}</th>
+                            <th>{{#str}}col_term, local_coifish{{/str}}</th>
                             <th class="text-center">{{#str}}col_grade, local_coifish{{/str}}</th>
                             <th class="text-center">{{#str}}col_engagement, local_coifish{{/str}}</th>
                             <th class="text-center">{{#str}}col_social, local_coifish{{/str}}</th>
@@ -179,7 +248,8 @@
                     <tbody>
                         {{#history}}
                         <tr>
-                            <td>{{coursename}}</td>
+                            <td><a href="{{viewurl}}" target="_blank" rel="noopener">{{coursename}}</a></td>
+                            <td>{{termlabel}}</td>
                             <td class="text-center">
                                 {{#finalgrade}}{{finalgrade}}%{{/finalgrade}}
                                 {{^finalgrade}}<span class="text-muted">-</span>{{/finalgrade}}

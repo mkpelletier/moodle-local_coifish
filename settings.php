@@ -123,6 +123,28 @@ if ($hassiteconfig) {
         PARAM_INT
     ));
 
+    // Term label source for the Current Enrolments table.
+    $settings->add(new admin_setting_configselect(
+        'local_coifish/term_source',
+        get_string('setting_term_source', 'local_coifish'),
+        get_string('setting_term_source_desc', 'local_coifish'),
+        'category',
+        [
+            'category' => get_string('term_source_category', 'local_coifish'),
+            'fullname' => get_string('term_source_fullname', 'local_coifish'),
+            'customfield' => get_string('term_source_customfield', 'local_coifish'),
+        ]
+    ));
+
+    // Optional customfield shortname used when term_source = customfield.
+    $settings->add(new admin_setting_configtext(
+        'local_coifish/term_customfield_shortname',
+        get_string('setting_term_customfield_shortname', 'local_coifish'),
+        get_string('setting_term_customfield_shortname_desc', 'local_coifish'),
+        '',
+        PARAM_ALPHANUMEXT
+    ));
+
     // Live session preparation multiplier.
     $settings->add(new admin_setting_configselect(
         'local_coifish/prep_multiplier',

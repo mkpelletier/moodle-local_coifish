@@ -83,6 +83,36 @@ class student_drilldown implements renderable, templatable {
         $data->history = $history;
         $data->hashistory = !empty($history);
 
+        // Current enrolments (in-progress courses).
+        $current = \local_coifish\api::get_current_enrolments($this->userid);
+        foreach ($current as &$row) {
+            $row['coursestartformatted'] = !empty($row['coursestartdate'])
+                ? userdate($row['coursestartdate'], get_string('strftimedate'))
+                : '-';
+            $row['courseendformatted'] = !empty($row['courseenddate'])
+                ? userdate($row['courseenddate'], get_string('strftimedate'))
+                : '-';
+        }
+        unset($row);
+        $data->current = $current;
+        $data->hascurrent = !empty($current);
+
+        // Freshness caption + refresh button.
+        $latest = \local_coifish\api::get_current_enrolments_freshness($this->userid);
+        if ($latest > 0) {
+            $data->freshnesslabel = get_string(
+                'freshness_label',
+                'local_coifish',
+                format_time(time() - $latest)
+            );
+        } else {
+            $data->freshnesslabel = get_string('freshness_never', 'local_coifish');
+        }
+        $data->refreshurl = (new \moodle_url('/local/coifish/refreshcurrent.php', [
+            'userid' => $this->userid,
+            'sesskey' => sesskey(),
+        ]))->out(false);
+
         // Back link.
         $data->backurl = (new \moodle_url('/local/coifish/index.php'))->out(false);
 

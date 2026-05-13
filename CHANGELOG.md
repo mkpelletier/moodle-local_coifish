@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.3.2] - 2026-05-13
+
+### Added
+- **Enrolment-status filter on Student Risk Overview** — new dropdown with three options: "Currently enrolled" (default), "All", and "No current enrolment". Reduces noise from students on a study break, and surfaces re-engagement opportunities. Sourced directly from `user_enrolments` so it works even before the active-snapshot task has run.
+
+## [1.3.1] - 2026-05-13
+
+### Security
+- **Privacy provider** added — declares the four user-keyed tables (`profile`, `course_snapshot`, `active_snapshot`, `lecturer`) to Moodle's privacy subsystem with full export, contextlist, userlist and delete support. Required for GDPR / PoPIA compliance.
+- **CSRF hardening on CSV export** — `export.php` now requires a valid sesskey when downloading the lecturer time report.
+- **Regex validation on cohort programme patterns** — admin setting rejects patterns that fail to compile or contain catastrophic-backtracking nested quantifiers (e.g. `(a+)+`).
+
+### Changed
+- Risk overview SQL now uses `\core_user\fields::for_name()` so display names respect `fullnamedisplay` and alternate-name privacy controls.
+
+### Removed
+- Unused `\local_coifish\api::get_student_profiles()` (dead code with no callers).
+
+## [1.3.0] - 2026-05-13
+
+### Added
+- **Current Enrolments table** on the student drill-down — shows in-progress courses (with term, start/end, grade so far, engagement, social, self-reg, feedback) for active enrolments that have not yet completed and so are not in Course History.
+- **New scheduled task `build_active_snapshots`** (daily at 03:30) populates the new `local_coifish_active_snapshot` table for visible currently-running courses.
+- **On-demand refresh button** on the student drill-down. Recomputes only this student's active-enrolment snapshots, throttled to once per hour per course to protect small servers.
+- **Freshness caption** ("Last refreshed: X ago") above the Current Enrolments table.
+- **Drill-down hyperlinks on course names** in both Current Enrolments and Course History — each links to `/grade/report/coifish/index.php?id=COURSEID&userid=USERID` and opens in a new tab.
+- **`Term label source` admin setting** — choose whether the term column reads from the immediate parent course category (default), the course fullname, or a course customfield (shortname configurable).
+
+### Changed
+- Shared metric calculation factored into `local_coifish\metrics_helper` so the new active-snapshot task and the existing post-course snapshot task compute identically.
+
 ## [1.2.1] - 2026-04-09
 
 ### Changed

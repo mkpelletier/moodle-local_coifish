@@ -63,7 +63,11 @@ class local_coifish_admin_setting_cohortpatterns extends admin_setting {
     public function write_setting($data) {
         // The data comes from our hidden field which JS populates.
         // If JS didn't run, fall back to reading individual POST fields.
-        if (!empty($data) && $data !== '' && json_decode($data) !== null) {
+        if (!empty($data) && $data !== '' && ($decoded = json_decode($data, true)) !== null) {
+            $error = self::validate_patterns($decoded);
+            if ($error !== '') {
+                return $error;
+            }
             return ($this->config_write($this->name, $data) ? '' : get_string('errorsetting', 'admin'));
         }
 
@@ -89,8 +93,41 @@ class local_coifish_admin_setting_cohortpatterns extends admin_setting {
             }
         }
 
+        $error = self::validate_patterns($settings);
+        if ($error !== '') {
+            return $error;
+        }
+
         $json = json_encode($settings);
         return ($this->config_write($this->name, $json) ? '' : get_string('errorsetting', 'admin'));
+    }
+
+    /**
+     * Validate every pattern in a decoded settings array compiles as a valid PHP regex,
+     * and reject patterns containing nested quantifiers that are common ReDoS vectors.
+     *
+     * @param array $settings Decoded cohort->[enabled,pattern] map.
+     * @return string Empty on success, localised error message on failure.
+     */
+    protected static function validate_patterns(array $settings): string {
+        foreach ($settings as $entry) {
+            $pattern = isset($entry['pattern']) ? trim((string)$entry['pattern']) : '';
+            if ($pattern === '') {
+                continue;
+            }
+            // Compile check with warnings suppressed.
+            $ok = @preg_match('/' . $pattern . '/', '');
+            if ($ok === false) {
+                return get_string('setting_cohortpatterns_invalid', 'local_coifish', $pattern);
+            }
+            // Reject obvious catastrophic-backtracking shapes: nested quantifiers
+            // like (a+)+, (a*)+, (a+)*. These are rarely intentional in a course
+            // shortname filter and can hang request threads under bad input.
+            if (preg_match('/\([^)]*[+*][^)]*\)[+*]/', $pattern)) {
+                return get_string('setting_cohortpatterns_redos', 'local_coifish', $pattern);
+            }
+        }
+        return '';
     }
 
     /**

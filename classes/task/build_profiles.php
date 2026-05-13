@@ -137,13 +137,13 @@ class build_profiles extends scheduled_task {
                 continue;
             }
 
-            $snapshot = $this->capture_student_metrics($courseid, $userid, $courseitem);
+            $snapshot = \local_coifish\metrics_helper::capture_student_metrics($courseid, $userid, $courseitem);
             if ($snapshot === null) {
                 continue;
             }
 
             // Get intervention data from CoIFish tables (if they exist).
-            $intvdata = $this->get_intervention_summary($courseid, $userid);
+            $intvdata = \local_coifish\metrics_helper::get_intervention_summary($courseid, $userid);
 
             $DB->insert_record('local_coifish_course_snapshot', (object)[
                 'userid' => $userid,
@@ -160,174 +160,6 @@ class build_profiles extends scheduled_task {
                 'timecreated' => $now,
             ]);
         }
-    }
-
-    /**
-     * Capture a student's final metrics for a course.
-     *
-     * @param int $courseid Course ID.
-     * @param int $userid Student user ID.
-     * @param object $courseitem The course grade item.
-     * @return array|null Metrics or null if no grade.
-     */
-    protected function capture_student_metrics(int $courseid, int $userid, object $courseitem): ?array {
-        global $DB;
-
-        // Final grade.
-        $gg = $DB->get_record('grade_grades', [
-            'itemid' => $courseitem->id,
-            'userid' => $userid,
-        ]);
-        if (!$gg || $gg->finalgrade === null) {
-            return null; // No grade means likely didn't participate.
-        }
-        $grade = round(((float)$gg->finalgrade / (float)$courseitem->grademax) * 100, 2);
-
-        // Engagement: distinct activities viewed.
-        $totalactivities = (int)$DB->count_records_sql(
-            "SELECT COUNT(cm.id)
-               FROM {course_modules} cm
-               JOIN {modules} m ON m.id = cm.module
-              WHERE cm.course = :cid AND cm.deletioninprogress = 0
-                AND m.name IN ('assign', 'quiz', 'page', 'book', 'resource', 'url', 'folder')",
-            ['cid' => $courseid]
-        );
-        $engaged = (int)$DB->count_records_sql(
-            "SELECT COUNT(DISTINCT l.contextinstanceid)
-               FROM {logstore_standard_log} l
-              WHERE l.courseid = :cid AND l.userid = :uid
-                AND l.action = 'viewed' AND l.target = 'course_module'",
-            ['cid' => $courseid, 'uid' => $userid]
-        );
-        $engagement = $totalactivities > 0 ? min(100, round(($engaged / $totalactivities) * 100)) : null;
-
-        // Social presence: composite of forum breadth, volume, and collaborative activity.
-        // Group-aware: count only discussions visible to the student.
-        $alldiscussions = $DB->get_records_sql(
-            "SELECT fd.id, fd.groupid, cm.groupmode
-               FROM {forum_discussions} fd
-               JOIN {forum} f ON f.id = fd.forum
-               JOIN {course_modules} cm ON cm.instance = f.id AND cm.course = :cid
-               JOIN {modules} m ON m.id = cm.module AND m.name = 'forum'
-              WHERE fd.course = :cid2",
-            ['cid' => $courseid, 'cid2' => $courseid]
-        );
-        $usergroups = groups_get_user_groups($courseid, $userid);
-        $mygroupids = $usergroups[0] ?? [];
-        $visiblediscussions = 0;
-        foreach ($alldiscussions as $disc) {
-            if ((int)$disc->groupmode === SEPARATEGROUPS) {
-                if ((int)$disc->groupid === -1 || in_array((int)$disc->groupid, $mygroupids)) {
-                    $visiblediscussions++;
-                }
-            } else {
-                $visiblediscussions++;
-            }
-        }
-        $threads = (int)$DB->count_records_sql(
-            "SELECT COUNT(DISTINCT fd.id)
-               FROM {forum_posts} fp
-               JOIN {forum_discussions} fd ON fd.id = fp.discussion
-              WHERE fd.course = :cid AND fp.userid = :uid",
-            ['cid' => $courseid, 'uid' => $userid]
-        );
-        $postcount = (int)$DB->count_records_sql(
-            "SELECT COUNT(fp.id)
-               FROM {forum_posts} fp
-               JOIN {forum_discussions} fd ON fd.id = fp.discussion
-              WHERE fd.course = :cid AND fp.userid = :uid",
-            ['cid' => $courseid, 'uid' => $userid]
-        );
-        // Breadth against visible discussions.
-        $breadth = $visiblediscussions > 0
-            ? min(100, round(($threads / $visiblediscussions) * 200))
-            : ($threads > 0 ? 50 : 0);
-        // Volume: 5 posts = 100%.
-        $volume = min(100, round($postcount / 5 * 100));
-        $social = ($breadth > 0 || $volume > 0)
-            ? round($breadth * 0.6 + $volume * 0.4)
-            : null;
-
-        // Feedback review percentage.
-        $totalfeedback = (int)$DB->count_records_sql(
-            "SELECT COUNT(ag.id)
-               FROM {assign_grades} ag
-               JOIN {assign} a ON a.id = ag.assignment
-              WHERE a.course = :cid AND ag.userid = :uid AND ag.grade >= 0",
-            ['cid' => $courseid, 'uid' => $userid]
-        );
-        $viewedfeedback = (int)$DB->count_records_sql(
-            "SELECT COUNT(DISTINCT l.contextinstanceid)
-               FROM {logstore_standard_log} l
-              WHERE l.userid = :uid AND l.courseid = :cid
-                AND l.eventname IN (:ev1, :ev2)",
-            [
-                'uid' => $userid, 'cid' => $courseid,
-                'ev1' => '\\mod_assign\\event\\feedback_viewed',
-                'ev2' => '\\mod_assign\\event\\submission_status_viewed',
-            ]
-        );
-        $feedbackpct = $totalfeedback > 0 ? min(100, round(($viewedfeedback / $totalfeedback) * 100)) : null;
-
-        // Self-regulation: approximate from grade check frequency.
-        $gradechecks = (int)$DB->count_records_sql(
-            "SELECT COUNT(*)
-               FROM {logstore_standard_log}
-              WHERE userid = :uid AND courseid = :cid
-                AND eventname = :ev",
-            [
-                'uid' => $userid, 'cid' => $courseid,
-                'ev' => '\\gradereport_user\\event\\grade_report_viewed',
-            ]
-        );
-        // Normalise: 10+ checks over a course = 100.
-        $selfregulation = min(100, round($gradechecks * 10));
-
-        return [
-            'grade' => $grade,
-            'engagement' => $engagement,
-            'social' => $social,
-            'selfregulation' => $selfregulation,
-            'feedbackpct' => $feedbackpct,
-        ];
-    }
-
-    /**
-     * Get intervention summary from CoIFish tables for a student in a course.
-     *
-     * @param int $courseid Course ID.
-     * @param int $userid Student user ID.
-     * @return array ['count' => int, 'improved' => int]
-     */
-    protected function get_intervention_summary(int $courseid, int $userid): array {
-        global $DB;
-
-        $dbman = $DB->get_manager();
-        if (!$dbman->table_exists('gradereport_coifish_intv')) {
-            return ['count' => 0, 'improved' => 0];
-        }
-
-        $count = (int)$DB->count_records_sql(
-            "SELECT COUNT(DISTINCT i.id)
-               FROM {gradereport_coifish_intv} i
-               JOIN {gradereport_coifish_intv_stu} s ON s.interventionid = i.id
-              WHERE i.courseid = :cid AND s.studentid = :uid",
-            ['cid' => $courseid, 'uid' => $userid]
-        );
-
-        $improved = 0;
-        if ($count > 0) {
-            $improved = (int)$DB->count_records_sql(
-                "SELECT COUNT(DISTINCT i.id)
-                   FROM {gradereport_coifish_intv} i
-                   JOIN {gradereport_coifish_intv_stu} s ON s.interventionid = i.id
-                   JOIN {gradereport_coifish_intv_out} o ON o.intvstudentid = s.id
-                  WHERE i.courseid = :cid AND s.studentid = :uid AND o.outcome = 'improved'",
-                ['cid' => $courseid, 'uid' => $userid]
-            );
-        }
-
-        return ['count' => $count, 'improved' => $improved];
     }
 
     /**

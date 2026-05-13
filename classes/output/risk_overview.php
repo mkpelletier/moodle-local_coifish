@@ -39,15 +39,20 @@ class risk_overview implements renderable, templatable {
     /** @var string Risk level filter: 'all', 'moderate', or 'high'. */
     protected string $risklevel;
 
+    /** @var string Enrolment-status filter: 'all', 'current', or 'notenrolled'. */
+    protected string $enrolstatus;
+
     /**
      * Constructor.
      *
      * @param int $filterid Filter ID (category or cohort).
      * @param string $risklevel Risk level filter.
+     * @param string $enrolstatus Current-enrolment filter.
      */
-    public function __construct(int $filterid = 0, string $risklevel = 'all') {
+    public function __construct(int $filterid = 0, string $risklevel = 'all', string $enrolstatus = 'current') {
         $this->filterid = $filterid;
         $this->risklevel = $risklevel;
+        $this->enrolstatus = $enrolstatus;
     }
 
     /**
@@ -64,9 +69,9 @@ class risk_overview implements renderable, templatable {
         // Get filtered students based on organisation mode.
         if ($mode === 'cohort') {
             $studentids = filter_helper::get_filtered_student_ids($this->filterid);
-            $students = \local_coifish\api::get_risk_overview(0, $this->risklevel, $studentids);
+            $students = \local_coifish\api::get_risk_overview(0, $this->risklevel, $studentids, $this->enrolstatus);
         } else {
-            $students = \local_coifish\api::get_risk_overview($this->filterid, $this->risklevel);
+            $students = \local_coifish\api::get_risk_overview($this->filterid, $this->risklevel, null, $this->enrolstatus);
         }
 
         $data->students = $students;
@@ -97,6 +102,10 @@ class risk_overview implements renderable, templatable {
         $data->isriskall = ($this->risklevel === 'all');
         $data->isriskhigh = ($this->risklevel === 'high');
         $data->isriskmoderate = ($this->risklevel === 'moderate');
+        $data->selectedenrolstatus = $this->enrolstatus;
+        $data->isenrolall = ($this->enrolstatus === 'all');
+        $data->isenrolcurrent = ($this->enrolstatus === 'current');
+        $data->isenrolnotenrolled = ($this->enrolstatus === 'notenrolled');
 
         // Form action URL.
         $data->formurl = (new \moodle_url('/local/coifish/index.php'))->out(false);

@@ -31,6 +31,10 @@ require_once('../../config.php');
 $categoryid = optional_param('categoryid', 0, PARAM_INT);
 $cohortid = optional_param('cohortid', 0, PARAM_INT);
 $risklevel = optional_param('risklevel', 'all', PARAM_ALPHA);
+$enrolstatus = optional_param('enrolstatus', 'current', PARAM_ALPHA);
+if (!in_array($enrolstatus, ['all', 'current', 'notenrolled'], true)) {
+    $enrolstatus = 'current';
+}
 
 require_login();
 
@@ -44,12 +48,13 @@ $PAGE->set_context($context);
 $PAGE->set_url(new moodle_url('/local/coifish/index.php', [
     ($mode === 'cohort' ? 'cohortid' : 'categoryid') => $filterid,
     'risklevel' => $risklevel,
+    'enrolstatus' => $enrolstatus,
 ]));
 $PAGE->set_title(get_string('risk_overview_title', 'local_coifish'));
 $PAGE->set_heading(get_string('risk_overview_title', 'local_coifish'));
 $PAGE->set_pagelayout('report');
 
-$renderable = new \local_coifish\output\risk_overview($filterid, $risklevel);
+$renderable = new \local_coifish\output\risk_overview($filterid, $risklevel, $enrolstatus);
 
 echo $OUTPUT->header();
 echo $OUTPUT->render_from_template('local_coifish/risk_overview', $renderable->export_for_template($OUTPUT));

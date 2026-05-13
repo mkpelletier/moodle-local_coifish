@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="local/coifish/db" VERSION="2026040100" COMMENT="CoIFish longitudinal profile tables">
+<XMLDB PATH="local/coifish/db" VERSION="2026051300" COMMENT="CoIFish longitudinal profile tables">
   <TABLES>
     <TABLE NAME="local_coifish_profile" COMMENT="Aggregated longitudinal student profile built from historical course data.">
       <FIELDS>
@@ -52,6 +52,31 @@
       <INDEXES>
         <INDEX NAME="userid_courseid" UNIQUE="true" FIELDS="userid, courseid"/>
         <INDEX NAME="userid" UNIQUE="false" FIELDS="userid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_coifish_active_snapshot" COMMENT="Per-course snapshot of a student's in-progress metrics for currently active enrolments. Refreshed daily and on demand. Distinct from local_coifish_course_snapshot which only stores final post-course values.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="currentgrade" TYPE="number" LENGTH="7" DECIMALS="2" NOTNULL="false" SEQUENCE="false" COMMENT="Course grade % so far (partial)"/>
+        <FIELD NAME="engagement" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="social" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="selfregulation" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="feedbackpct" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="coursestartdate" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="courseenddate" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="categoryid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Course category at refresh time"/>
+        <FIELD NAME="termlabel" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Resolved term label per term_source setting"/>
+        <FIELD NAME="timecomputed" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="userid_courseid" UNIQUE="true" FIELDS="userid, courseid"/>
+        <INDEX NAME="userid" UNIQUE="false" FIELDS="userid"/>
+        <INDEX NAME="timecomputed" UNIQUE="false" FIELDS="timecomputed"/>
       </INDEXES>
     </TABLE>
     <TABLE NAME="local_coifish_lecturer" COMMENT="Aggregated lecturer performance profile across courses, built by scheduled task.">

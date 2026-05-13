@@ -61,32 +61,6 @@ class api {
     }
 
     /**
-     * Get profiles for multiple students (e.g. for a cohort early-warning list).
-     *
-     * @param array $userids Array of student user IDs.
-     * @param int $courseid Course context for capability checks.
-     * @return array Keyed by userid.
-     */
-    public static function get_student_profiles(array $userids, int $courseid = 0): array {
-        global $DB;
-
-        $enabled = get_config('local_coifish', 'profile_enabled');
-        if ($enabled === '0' || empty($userids)) {
-            return [];
-        }
-
-        [$insql, $inparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
-        $profiles = $DB->get_records_select('local_coifish_profile', "userid $insql", $inparams);
-
-        $detaillevel = self::get_detail_level($courseid);
-        $result = [];
-        foreach ($profiles as $profile) {
-            $result[$profile->userid] = self::format_profile($profile, $detaillevel);
-        }
-        return $result;
-    }
-
-    /**
      * Get students at risk for early warning in a course.
      *
      * Returns profiles for enrolled students who have moderate or high risk levels.
@@ -144,12 +118,15 @@ class api {
      * @param int $categoryid Course category filter (0 for all). Ignored in cohort mode.
      * @param string $risklevel Filter: 'all', 'moderate', 'high'.
      * @param array|null $studentids Explicit student ID filter (from cohort mode). Null = no filter.
+     * @param string $enrolstatus Enrolment-status filter: 'all', 'current' (has an active enrolment
+     *                            in a currently running visible course), or 'notenrolled' (none).
      * @return array Array of formatted profiles with user info.
      */
     public static function get_risk_overview(
         int $categoryid = 0,
         string $risklevel = 'all',
-        ?array $studentids = null
+        ?array $studentids = null,
+        string $enrolstatus = 'all'
     ): array {
         global $DB;
 
@@ -187,8 +164,33 @@ class api {
             $params = array_merge($params, $inparams);
         }
 
+        // Current-enrolment filter. Sources the truth from user_enrolments + course
+        // directly so the filter works even before the active-snapshot task has run.
+        if ($enrolstatus === 'current' || $enrolstatus === 'notenrolled') {
+            $existssql = "EXISTS (
+                SELECT 1
+                  FROM {user_enrolments} ce_ue
+                  JOIN {enrol} ce_e ON ce_e.id = ce_ue.enrolid
+                  JOIN {course} ce_c ON ce_c.id = ce_e.courseid
+                 WHERE ce_ue.userid = p.userid
+                   AND ce_ue.status = 0
+                   AND (ce_ue.timeend = 0 OR ce_ue.timeend > :ce_now1)
+                   AND (ce_ue.timestart = 0 OR ce_ue.timestart <= :ce_now2)
+                   AND ce_c.id != :ce_siteid
+                   AND ce_c.visible = 1
+                   AND (ce_c.enddate = 0 OR ce_c.enddate > :ce_now3)
+            )";
+            $conditions[] = ($enrolstatus === 'current') ? $existssql : "NOT $existssql";
+            $now = time();
+            $params['ce_now1'] = $now;
+            $params['ce_now2'] = $now;
+            $params['ce_now3'] = $now;
+            $params['ce_siteid'] = SITEID;
+        }
+
+        $namefields = \core_user\fields::for_name()->get_sql('u')->selects;
         $where = implode(' AND ', $conditions);
-        $sql = "SELECT DISTINCT p.*, u.firstname, u.lastname,
+        $sql = "SELECT DISTINCT p.* $namefields,
                        CASE p.risklevel WHEN 'high' THEN 1 WHEN 'moderate' THEN 2 ELSE 3 END AS risksort
                   FROM {local_coifish_profile} p
                   JOIN {user} u ON u.id = p.userid AND u.deleted = 0
@@ -202,7 +204,7 @@ class api {
         foreach ($records as $rec) {
             $profile = self::format_profile($rec, 'full');
             $profile['userid'] = (int)$rec->userid;
-            $profile['fullname'] = $rec->firstname . ' ' . $rec->lastname;
+            $profile['fullname'] = fullname($rec);
             $profile['viewurl'] = (new \moodle_url('/local/coifish/studentprofile.php', [
                 'userid' => $rec->userid,
             ]))->out(false);
@@ -221,7 +223,7 @@ class api {
         global $DB;
 
         $snapshots = $DB->get_records_sql(
-            "SELECT cs.*, c.fullname AS coursename
+            "SELECT cs.*, c.fullname AS coursename, c.category AS coursecategory
                FROM {local_coifish_course_snapshot} cs
                JOIN {course} c ON c.id = cs.courseid
               WHERE cs.userid = :userid
@@ -231,9 +233,12 @@ class api {
 
         $result = [];
         foreach ($snapshots as $snap) {
+            $course = (object)['id' => $snap->courseid, 'category' => $snap->coursecategory, 'fullname' => $snap->coursename];
             $result[] = [
                 'courseid' => (int)$snap->courseid,
-                'coursename' => $snap->coursename,
+                'coursename' => format_string($snap->coursename),
+                'termlabel' => \local_coifish\metrics_helper::resolve_term_label($course),
+                'viewurl' => \local_coifish\metrics_helper::coifish_report_url((int)$snap->courseid, $userid)->out(false),
                 'finalgrade' => $snap->finalgrade !== null ? round($snap->finalgrade, 1) : null,
                 'engagement' => (int)$snap->engagement,
                 'social' => (int)$snap->social,
@@ -245,6 +250,78 @@ class api {
             ];
         }
         return $result;
+    }
+
+    /**
+     * Get a student's current (in-progress) course enrolments with cached metrics.
+     *
+     * Sourced from {local_coifish_active_snapshot}, which is refreshed daily by
+     * the build_active_snapshots task and on demand from the drill-down page.
+     * Filtered to courses that are still visible and currently running, in case
+     * a snapshot lingers after the course has ended or been hidden.
+     *
+     * @param int $userid The student user ID.
+     * @return array Ordered array of current enrolment rows.
+     */
+    public static function get_current_enrolments(int $userid): array {
+        global $DB;
+
+        $now = time();
+        $rows = $DB->get_records_sql(
+            "SELECT acs.*, c.fullname AS coursename, c.category AS coursecategory,
+                    c.startdate AS coursestart, c.enddate AS courseend
+               FROM {local_coifish_active_snapshot} acs
+               JOIN {course} c ON c.id = acs.courseid
+              WHERE acs.userid = :userid
+                AND c.visible = 1
+                AND (c.enddate = 0 OR c.enddate > :now)
+           ORDER BY c.startdate DESC, c.fullname ASC",
+            ['userid' => $userid, 'now' => $now]
+        );
+
+        $result = [];
+        foreach ($rows as $row) {
+            $course = (object)[
+                'id' => $row->courseid,
+                'category' => $row->coursecategory,
+                'fullname' => $row->coursename,
+            ];
+            // Fall back to live term resolution if termlabel is stale or admin
+            // changed the term_source setting since the snapshot was written.
+            $termlabel = !empty($row->termlabel)
+                ? $row->termlabel
+                : \local_coifish\metrics_helper::resolve_term_label($course);
+            $result[] = [
+                'courseid' => (int)$row->courseid,
+                'coursename' => format_string($row->coursename),
+                'termlabel' => $termlabel,
+                'viewurl' => \local_coifish\metrics_helper::coifish_report_url((int)$row->courseid, $userid)->out(false),
+                'currentgrade' => $row->currentgrade !== null ? round($row->currentgrade, 1) : null,
+                'engagement' => $row->engagement !== null ? (int)$row->engagement : null,
+                'social' => $row->social !== null ? (int)$row->social : null,
+                'selfregulation' => $row->selfregulation !== null ? (int)$row->selfregulation : null,
+                'feedbackpct' => $row->feedbackpct !== null ? (int)$row->feedbackpct : null,
+                'coursestartdate' => (int)$row->coursestart,
+                'courseenddate' => (int)$row->courseend,
+                'timecomputed' => (int)$row->timecomputed,
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * Latest timecomputed across all of a student's active snapshots.
+     *
+     * @param int $userid
+     * @return int Unix timestamp, or 0 if no snapshots exist.
+     */
+    public static function get_current_enrolments_freshness(int $userid): int {
+        global $DB;
+        $val = $DB->get_field_sql(
+            "SELECT MAX(timecomputed) FROM {local_coifish_active_snapshot} WHERE userid = :uid",
+            ['uid' => $userid]
+        );
+        return (int)$val;
     }
 
     /**

@@ -122,5 +122,32 @@ function xmldb_local_coifish_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026040300, 'local', 'coifish');
     }
 
+    if ($oldversion < 2026051300) {
+        $table = new xmldb_table('local_coifish_active_snapshot');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('courseid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('currentgrade', XMLDB_TYPE_NUMBER, '7, 2', null, null, null, null);
+        $table->add_field('engagement', XMLDB_TYPE_INTEGER, '3', null, null, null, null);
+        $table->add_field('social', XMLDB_TYPE_INTEGER, '3', null, null, null, null);
+        $table->add_field('selfregulation', XMLDB_TYPE_INTEGER, '3', null, null, null, null);
+        $table->add_field('feedbackpct', XMLDB_TYPE_INTEGER, '3', null, null, null, null);
+        $table->add_field('coursestartdate', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('courseenddate', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('categoryid', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('termlabel', XMLDB_TYPE_CHAR, '255', null, null, null, null);
+        $table->add_field('timecomputed', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('userid_courseid', XMLDB_INDEX_UNIQUE, ['userid', 'courseid']);
+        $table->add_index('userid', XMLDB_INDEX_NOTUNIQUE, ['userid']);
+        $table->add_index('timecomputed', XMLDB_INDEX_NOTUNIQUE, ['timecomputed']);
+
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026051300, 'local', 'coifish');
+    }
+
     return true;
 }
