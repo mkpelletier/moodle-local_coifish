@@ -41,12 +41,23 @@ class metrics_helper {
      * yet. In-progress callers should still persist these rows; post-course
      * callers should treat grade === null as "did not participate" and skip.
      *
+     * When $endtime > 0, time-based queries (log events, forum posts, feedback
+     * views, grade checks) are clamped at that timestamp so post-course activity
+     * — students browsing closed course content months later — does not skew the
+     * frozen snapshot used for longitudinal aggregation.
+     *
      * @param int $courseid Course ID.
      * @param int $userid Student user ID.
      * @param object|null $courseitem The course grade item, or null if absent.
+     * @param int $endtime Optional upper bound on timestamps (0 = no bound).
      * @return array ['grade' => float|null, 'engagement', 'social', 'selfregulation', 'feedbackpct']
      */
-    public static function capture_student_metrics(int $courseid, int $userid, ?object $courseitem): array {
+    public static function capture_student_metrics(
+        int $courseid,
+        int $userid,
+        ?object $courseitem,
+        int $endtime = 0
+    ): array {
         global $DB;
 
         $grade = null;
@@ -60,21 +71,21 @@ class metrics_helper {
             }
         }
 
+        $timeclause = $endtime > 0 ? ' AND l.timecreated <= :endtime' : '';
+        $postclause = $endtime > 0 ? ' AND fp.created <= :endtime' : '';
+        $endparams = $endtime > 0 ? ['endtime' => $endtime] : [];
+
         // Engagement: distinct activities viewed.
-        $totalactivities = (int)$DB->count_records_sql(
-            "SELECT COUNT(cm.id)
-               FROM {course_modules} cm
-               JOIN {modules} m ON m.id = cm.module
-              WHERE cm.course = :cid AND cm.deletioninprogress = 0
-                AND m.name IN ('assign', 'quiz', 'page', 'book', 'resource', 'url', 'folder')",
-            ['cid' => $courseid]
-        );
+        // Drop/keep-aware so optional assignments/quizzes don't inflate the denominator
+        // and skew the longitudinal engagement signal downward for students who legitimately
+        // skipped optional work.
+        $totalactivities = \gradereport_coifish\report::get_expected_activity_count($courseid);
         $engaged = (int)$DB->count_records_sql(
             "SELECT COUNT(DISTINCT l.contextinstanceid)
                FROM {logstore_standard_log} l
               WHERE l.courseid = :cid AND l.userid = :uid
-                AND l.action = 'viewed' AND l.target = 'course_module'",
-            ['cid' => $courseid, 'uid' => $userid]
+                AND l.action = 'viewed' AND l.target = 'course_module'" . $timeclause,
+            array_merge(['cid' => $courseid, 'uid' => $userid], $endparams)
         );
         $engagement = $totalactivities > 0 ? min(100, round(($engaged / $totalactivities) * 100)) : null;
 
@@ -104,15 +115,15 @@ class metrics_helper {
             "SELECT COUNT(DISTINCT fd.id)
                FROM {forum_posts} fp
                JOIN {forum_discussions} fd ON fd.id = fp.discussion
-              WHERE fd.course = :cid AND fp.userid = :uid",
-            ['cid' => $courseid, 'uid' => $userid]
+              WHERE fd.course = :cid AND fp.userid = :uid" . $postclause,
+            array_merge(['cid' => $courseid, 'uid' => $userid], $endparams)
         );
         $postcount = (int)$DB->count_records_sql(
             "SELECT COUNT(fp.id)
                FROM {forum_posts} fp
                JOIN {forum_discussions} fd ON fd.id = fp.discussion
-              WHERE fd.course = :cid AND fp.userid = :uid",
-            ['cid' => $courseid, 'uid' => $userid]
+              WHERE fd.course = :cid AND fp.userid = :uid" . $postclause,
+            array_merge(['cid' => $courseid, 'uid' => $userid], $endparams)
         );
         $breadth = $visiblediscussions > 0
             ? min(100, round(($threads / $visiblediscussions) * 200))
@@ -123,36 +134,37 @@ class metrics_helper {
             : null;
 
         // Feedback review percentage.
+        $feedbacktimeclause = $endtime > 0 ? ' AND ag.timemodified <= :endtime' : '';
         $totalfeedback = (int)$DB->count_records_sql(
             "SELECT COUNT(ag.id)
                FROM {assign_grades} ag
                JOIN {assign} a ON a.id = ag.assignment
-              WHERE a.course = :cid AND ag.userid = :uid AND ag.grade >= 0",
-            ['cid' => $courseid, 'uid' => $userid]
+              WHERE a.course = :cid AND ag.userid = :uid AND ag.grade >= 0" . $feedbacktimeclause,
+            array_merge(['cid' => $courseid, 'uid' => $userid], $endparams)
         );
         $viewedfeedback = (int)$DB->count_records_sql(
             "SELECT COUNT(DISTINCT l.contextinstanceid)
                FROM {logstore_standard_log} l
               WHERE l.userid = :uid AND l.courseid = :cid
-                AND l.eventname IN (:ev1, :ev2)",
-            [
+                AND l.eventname IN (:ev1, :ev2)" . $timeclause,
+            array_merge([
                 'uid' => $userid, 'cid' => $courseid,
                 'ev1' => '\\mod_assign\\event\\feedback_viewed',
                 'ev2' => '\\mod_assign\\event\\submission_status_viewed',
-            ]
+            ], $endparams)
         );
         $feedbackpct = $totalfeedback > 0 ? min(100, round(($viewedfeedback / $totalfeedback) * 100)) : null;
 
         // Self-regulation approximation: grade-check frequency.
         $gradechecks = (int)$DB->count_records_sql(
             "SELECT COUNT(*)
-               FROM {logstore_standard_log}
-              WHERE userid = :uid AND courseid = :cid
-                AND eventname = :ev",
-            [
+               FROM {logstore_standard_log} l
+              WHERE l.userid = :uid AND l.courseid = :cid
+                AND l.eventname = :ev" . $timeclause,
+            array_merge([
                 'uid' => $userid, 'cid' => $courseid,
                 'ev' => '\\gradereport_user\\event\\grade_report_viewed',
-            ]
+            ], $endparams)
         );
         $selfregulation = min(100, round($gradechecks * 10));
 

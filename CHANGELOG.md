@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3] - 2026-05-19
+
+### Fixed
+- **Snapshots for concluded courses no longer skew longitudinal data with post-course activity.** `metrics_helper::capture_student_metrics()` now accepts an `$endtime` parameter; the `build_profiles` task passes `$course->enddate` so engagement views, forum posts, feedback views, assignment-grade windows, and grade-checks are clamped at course end when the snapshot is written. `build_active_snapshots` is unchanged — it already excludes concluded courses.
+- **Engagement metric in longitudinal snapshots now honours grade-category drop/keep rules** via the shared `\gradereport_coifish\report::get_expected_activity_count()` helper. Optional assignments/quizzes in "best N of M" or "drop lowest N" categories no longer inflate the engagement denominator.
+- install.xml now declares the XMLDB schema namespace (resolves `core\db\plugin_checks_test::test_db_install_file` failure).
+
 ## [1.3.2] - 2026-05-13
 
 ### Added

@@ -137,7 +137,12 @@ class build_profiles extends scheduled_task {
                 continue;
             }
 
-            $snapshot = \local_coifish\metrics_helper::capture_student_metrics($courseid, $userid, $courseitem);
+            // Clamp metric queries at the course end date so post-course activity
+            // (e.g. students browsing closed course content) does not skew the snapshot.
+            $endtime = $courseenddate > 0 ? $courseenddate : 0;
+            $snapshot = \local_coifish\metrics_helper::capture_student_metrics(
+                $courseid, $userid, $courseitem, $endtime
+            );
             // A null grade after course end means the student did not participate;
             // do not pollute the longitudinal training set with such rows.
             if ($snapshot['grade'] === null) {

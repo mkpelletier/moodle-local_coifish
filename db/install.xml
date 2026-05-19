@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="local/coifish/db" VERSION="2026051300" COMMENT="CoIFish longitudinal profile tables">
+<XMLDB PATH="local/coifish/db" VERSION="2026051300" COMMENT="CoIFish longitudinal profile tables"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
+>
   <TABLES>
     <TABLE NAME="local_coifish_profile" COMMENT="Aggregated longitudinal student profile built from historical course data.">
       <FIELDS>
