@@ -142,16 +142,15 @@ class metrics_helper {
               WHERE a.course = :cid AND ag.userid = :uid AND ag.grade >= 0" . $feedbacktimeclause,
             array_merge(['cid' => $courseid, 'uid' => $userid], $endparams)
         );
+        [$evsql, $evparams] = \gradereport_coifish\report::get_feedback_view_event_sql('fve');
         $viewedfeedback = (int)$DB->count_records_sql(
             "SELECT COUNT(DISTINCT l.contextinstanceid)
                FROM {logstore_standard_log} l
               WHERE l.userid = :uid AND l.courseid = :cid
-                AND l.eventname IN (:ev1, :ev2)" . $timeclause,
+                AND l.eventname $evsql" . $timeclause,
             array_merge([
                 'uid' => $userid, 'cid' => $courseid,
-                'ev1' => '\\mod_assign\\event\\feedback_viewed',
-                'ev2' => '\\mod_assign\\event\\submission_status_viewed',
-            ], $endparams)
+            ], $evparams, $endparams)
         );
         $feedbackpct = $totalfeedback > 0 ? min(100, round(($viewedfeedback / $totalfeedback) * 100)) : null;
 

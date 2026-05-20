@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.4] - 2026-05-20
+
+### Changed
+- **Longitudinal feedback-review metric now counts Unified Grader feedback views** alongside the native `mod_assign` events, via the shared `\gradereport_coifish\report::get_feedback_view_event_sql()` helper. Snapshots taken against courses that use UG for assignments / quizzes / forums / BBB no longer under-report student engagement with feedback.
+
 ## [1.3.3] - 2026-05-19
 
 ### Fixed
