@@ -442,7 +442,13 @@ class api {
         $component = 'local_coifish';
         $recs = [];
 
-        // Engagement decline pattern.
+        // With only one historical snapshot we cannot honestly claim a
+        // cross-course pattern; pick softer single-course wording in that case.
+        $issinglecourse = ((int)$profile->coursescompleted) < 2;
+
+        // Engagement decline pattern. Engagement-decline classification needs
+        // ≥2 snapshots in classify_engagement_pattern(), so the cross-course
+        // framing is safe here.
         if ($profile->engagementpattern === 'declining' || in_array('engagement_decline', $riskfactors)) {
             $recs[] = [
                 'icon' => 'calendar-check-o',
@@ -456,7 +462,7 @@ class api {
             $recs[] = [
                 'icon' => 'users',
                 'severity' => 'warning',
-                'text' => get_string('rec_social_isolation', $component),
+                'text' => get_string($issinglecourse ? 'rec_social_isolation_single' : 'rec_social_isolation', $component),
             ];
         }
 
@@ -465,16 +471,22 @@ class api {
             $recs[] = [
                 'icon' => 'commenting-o',
                 'severity' => 'warning',
-                'text' => get_string('rec_feedback_neglect', $component),
+                'text' => get_string($issinglecourse ? 'rec_feedback_neglect_single' : 'rec_feedback_neglect', $component),
             ];
         }
 
-        // Unresponsive to interventions.
+        // Unresponsive to interventions. Uses intervention count for tone,
+        // not course count — a single failed intervention shouldn't claim
+        // "previous interventions" in the plural.
         if (in_array('intervention_unresponsive', $riskfactors)) {
+            $isfewinterventions = ((int)$profile->totalinterventions) < 2;
             $recs[] = [
                 'icon' => 'refresh',
                 'severity' => 'danger',
-                'text' => get_string('rec_intervention_unresponsive', $component),
+                'text' => get_string(
+                    $isfewinterventions ? 'rec_intervention_unresponsive_single' : 'rec_intervention_unresponsive',
+                    $component
+                ),
             ];
         }
 
@@ -489,10 +501,14 @@ class api {
 
         // Positive intervention response — reinforce what works.
         if ($profile->interventionresponse === 'positive') {
+            $isfewinterventions = ((int)$profile->totalinterventions) < 2;
             $recs[] = [
                 'icon' => 'thumbs-up',
                 'severity' => 'success',
-                'text' => get_string('rec_intervention_positive', $component),
+                'text' => get_string(
+                    $isfewinterventions ? 'rec_intervention_positive_single' : 'rec_intervention_positive',
+                    $component
+                ),
             ];
         }
 
