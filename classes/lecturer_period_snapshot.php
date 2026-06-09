@@ -227,7 +227,7 @@ class lecturer_period_snapshot {
     public static function week_bounds(int $ts): array {
         // Find Monday of the ISO week. The dow value is Sunday-indexed: 0 = Sun, 1 = Mon, etc.
         $dow = (int)gmdate('w', $ts);
-        $offset = ($dow === 0 ? 6 : $dow - 1); // days since Monday.
+        $offset = ($dow === 0 ? 6 : $dow - 1); // Days since Monday.
         $monday = strtotime(gmdate('Y-m-d', $ts - $offset * 86400) . ' 00:00:00 UTC');
         $sunday = $monday + 7 * 86400 - 1;
         return [$monday, $sunday];
