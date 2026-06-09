@@ -94,7 +94,7 @@ class build_profiles extends scheduled_task {
         );
 
         foreach ($courses as $course) {
-            $this->snapshot_course($course->id, $course->enddate ?: $now, $now);
+            $this->snapshot_course($course->id, $course->enddate ?: $now, $now, (int)$course->startdate);
         }
     }
 
@@ -104,8 +104,9 @@ class build_profiles extends scheduled_task {
      * @param int $courseid The course ID.
      * @param int $courseenddate The course end date.
      * @param int $now Current timestamp.
+     * @param int $coursestartdate The course start date (lower bound for log scans).
      */
-    protected function snapshot_course(int $courseid, int $courseenddate, int $now): void {
+    protected function snapshot_course(int $courseid, int $courseenddate, int $now, int $coursestartdate = 0): void {
         global $DB;
 
         $context = \context_course::instance($courseid, IGNORE_MISSING);
@@ -127,24 +128,33 @@ class build_profiles extends scheduled_task {
             return;
         }
 
+        // Pre-load existing snapshot userids for this course in one query so
+        // the per-student loop below skips an N+1 record_exists check.
+        $alreadysnapshotted = $DB->get_fieldset_select(
+            'local_coifish_course_snapshot',
+            'userid',
+            'courseid = :cid',
+            ['cid' => $courseid]
+        );
+        $alreadysnapshotted = array_flip(array_map('intval', $alreadysnapshotted));
+
         foreach (array_keys($students) as $userid) {
             // Skip if already snapshotted.
-            $snapshotexists = $DB->record_exists('local_coifish_course_snapshot', [
-                'userid' => $userid,
-                'courseid' => $courseid,
-            ]);
-            if ($snapshotexists) {
+            if (isset($alreadysnapshotted[(int)$userid])) {
                 continue;
             }
 
             // Clamp metric queries at the course end date so post-course activity
             // (e.g. students browsing closed course content) does not skew the snapshot.
+            // Lower-bound at the course start date so log scans use the
+            // logstore_standard_log time index instead of full-history scans.
             $endtime = $courseenddate > 0 ? $courseenddate : 0;
             $snapshot = \local_coifish\metrics_helper::capture_student_metrics(
                 $courseid,
                 $userid,
                 $courseitem,
-                $endtime
+                $endtime,
+                $coursestartdate
             );
             // A null grade after course end means the student did not participate;
             // do not pollute the longitudinal training set with such rows.

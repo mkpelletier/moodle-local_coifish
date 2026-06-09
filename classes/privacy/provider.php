@@ -113,6 +113,24 @@ class provider implements
             'privacy:metadata:local_coifish_lecturer'
         );
 
+        $collection->add_database_table(
+            'local_coifish_lecturer_period_snapshot',
+            [
+                'userid' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:userid',
+                'periodstart' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:periodstart',
+                'periodend' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:periodend',
+                'coursecount' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:coursecount',
+                'avgfeedbackquality' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:avgfeedbackquality',
+                'avgturnarounddays' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:avgturnarounddays',
+                'avgforumpostspw' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:avgforumpostspw',
+                'hours_total' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:hours_total',
+                'totalinterventions' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:totalinterventions',
+                'avgstudentgrade' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:avgstudentgrade',
+                'timecomputed' => 'privacy:metadata:local_coifish_lecturer_period_snapshot:timecomputed',
+            ],
+            'privacy:metadata:local_coifish_lecturer_period_snapshot'
+        );
+
         return $collection;
     }
 
@@ -134,6 +152,7 @@ class provider implements
                      OR EXISTS (SELECT 1 FROM {local_coifish_course_snapshot} WHERE userid = :u2)
                      OR EXISTS (SELECT 1 FROM {local_coifish_active_snapshot} WHERE userid = :u3)
                      OR EXISTS (SELECT 1 FROM {local_coifish_lecturer} WHERE userid = :u4)
+                     OR EXISTS (SELECT 1 FROM {local_coifish_lecturer_period_snapshot} WHERE userid = :u5)
                    )";
         $params = [
             'sysctx' => CONTEXT_SYSTEM,
@@ -141,6 +160,7 @@ class provider implements
             'u2' => $userid,
             'u3' => $userid,
             'u4' => $userid,
+            'u5' => $userid,
         ];
         $contextlist->add_from_sql($sql, $params);
 
@@ -163,6 +183,7 @@ class provider implements
             'local_coifish_course_snapshot',
             'local_coifish_active_snapshot',
             'local_coifish_lecturer',
+            'local_coifish_lecturer_period_snapshot',
         ];
         foreach ($tables as $table) {
             $userlist->add_from_sql('userid', "SELECT userid FROM {{$table}}", []);
@@ -241,6 +262,7 @@ class provider implements
         $DB->delete_records('local_coifish_course_snapshot');
         $DB->delete_records('local_coifish_active_snapshot');
         $DB->delete_records('local_coifish_lecturer');
+        $DB->delete_records('local_coifish_lecturer_period_snapshot');
     }
 
     /**
@@ -283,6 +305,7 @@ class provider implements
             'local_coifish_course_snapshot',
             'local_coifish_active_snapshot',
             'local_coifish_lecturer',
+            'local_coifish_lecturer_period_snapshot',
         ];
         foreach ($tables as $table) {
             $DB->delete_records_select($table, "userid $insql", $params);
@@ -301,6 +324,7 @@ class provider implements
             'local_coifish_course_snapshot',
             'local_coifish_active_snapshot',
             'local_coifish_lecturer',
+            'local_coifish_lecturer_period_snapshot',
         ];
         foreach ($tables as $table) {
             $DB->delete_records($table, ['userid' => $userid]);

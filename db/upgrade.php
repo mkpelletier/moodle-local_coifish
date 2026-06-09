@@ -149,5 +149,37 @@ function xmldb_local_coifish_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026051300, 'local', 'coifish');
     }
 
+    if ($oldversion < 2026060900) {
+        $table = new xmldb_table('local_coifish_lecturer_period_snapshot');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('periodstart', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('periodend', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('coursecount', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('avgfeedbackquality', XMLDB_TYPE_INTEGER, '3', null, null, null, null);
+        $table->add_field('avgcoverage', XMLDB_TYPE_INTEGER, '3', null, null, null, null);
+        $table->add_field('avgdepth', XMLDB_TYPE_INTEGER, '3', null, null, null, null);
+        $table->add_field('avgpersonalisation', XMLDB_TYPE_INTEGER, '3', null, null, null, null);
+        $table->add_field('avgturnarounddays', XMLDB_TYPE_NUMBER, '7, 1', null, null, null, null);
+        $table->add_field('avgforumpostspw', XMLDB_TYPE_NUMBER, '5, 1', null, null, null, null);
+        $table->add_field('hours_marking', XMLDB_TYPE_NUMBER, '7, 1', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('hours_communication', XMLDB_TYPE_NUMBER, '7, 1', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('hours_livesessions', XMLDB_TYPE_NUMBER, '7, 1', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('hours_total', XMLDB_TYPE_NUMBER, '7, 1', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('totalinterventions', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('interventionsimproved', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('avgstudentgrade', XMLDB_TYPE_NUMBER, '7, 2', null, null, null, null);
+        $table->add_field('timecomputed', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('userid_periodstart', XMLDB_INDEX_UNIQUE, ['userid', 'periodstart']);
+        $table->add_index('periodstart', XMLDB_INDEX_NOTUNIQUE, ['periodstart']);
+
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026060900, 'local', 'coifish');
+    }
+
     return true;
 }

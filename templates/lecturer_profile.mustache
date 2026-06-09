@@ -383,6 +383,47 @@
         </div>
     </div>
 
+    {{! Historical trends — sourced from the per-week local_coifish_lecturer_period_snapshot cache. }}
+    {{#hastrends}}
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="fa fa-line-chart me-1" aria-hidden="true"></i>
+                {{#str}}lecturer_trends_title, local_coifish{{/str}}
+            </h5>
+            <span class="small text-muted">{{#str}}lecturer_trends_window, local_coifish, {{trendweeks}}{{/str}}</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                {{#trends}}
+                <div class="col-sm-6 col-lg-4">
+                    <div class="d-flex align-items-center">
+                        <svg class="coifish-sparkline me-2" viewBox="0 0 {{width}} {{height}}"
+                             width="{{width}}" height="{{height}}"
+                             xmlns="http://www.w3.org/2000/svg" role="img" aria-label="{{label}}">
+                            <polyline points="{{points}}" fill="none" stroke="currentColor"
+                                      stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+                        </svg>
+                        <div class="flex-grow-1">
+                            <div class="small text-muted">{{label}}</div>
+                            <div>
+                                <span class="fw-semibold">{{latest}}{{unit}}</span>
+                                {{#isup}}<span class="text-success small ms-1">
+                                    <i class="fa fa-arrow-up" aria-hidden="true"></i> {{deltapct}}%
+                                </span>{{/isup}}
+                                {{#isdown}}<span class="text-danger small ms-1">
+                                    <i class="fa fa-arrow-down" aria-hidden="true"></i> {{deltapct}}%
+                                </span>{{/isdown}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {{/trends}}
+            </div>
+        </div>
+    </div>
+    {{/hastrends}}
+
     {{! Activity time breakdown }}
     {{#hashours}}
     <div class="card mb-4">

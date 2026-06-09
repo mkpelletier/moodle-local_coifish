@@ -123,6 +123,15 @@ if ($hassiteconfig) {
         PARAM_INT
     ));
 
+    // How far back the historical lecturer-trend backfill should go.
+    $settings->add(new admin_setting_configtext(
+        'local_coifish/lecturer_backfill_years',
+        get_string('setting_lecturer_backfill_years', 'local_coifish'),
+        get_string('setting_lecturer_backfill_years_desc', 'local_coifish'),
+        3,
+        PARAM_INT
+    ));
+
     // Term label source for the Current Enrolments table.
     $settings->add(new admin_setting_configselect(
         'local_coifish/term_source',

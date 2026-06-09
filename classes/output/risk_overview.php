@@ -66,28 +66,41 @@ class risk_overview implements renderable, templatable {
 
         $mode = filter_helper::get_mode();
 
-        // Get filtered students based on organisation mode.
+        // Summary counts (full filtered population, independent of pagination).
         if ($mode === 'cohort') {
             $studentids = filter_helper::get_filtered_student_ids($this->filterid);
-            $students = \local_coifish\api::get_risk_overview(0, $this->risklevel, $studentids, $this->enrolstatus);
+            $counts = \local_coifish\api::get_risk_overview_counts(0, $this->risklevel, $studentids, $this->enrolstatus);
         } else {
-            $students = \local_coifish\api::get_risk_overview($this->filterid, $this->risklevel, null, $this->enrolstatus);
+            $counts = \local_coifish\api::get_risk_overview_counts(
+                $this->filterid, $this->risklevel, null, $this->enrolstatus
+            );
         }
+        $data->totalcount = $counts['total'];
+        $data->highcount = $counts['high'];
+        $data->moderatecount = $counts['moderate'];
+        $data->hasstudents = $counts['total'] > 0;
 
-        $data->students = $students;
-        $data->hasstudents = !empty($students);
+        // Render the dynamic table's initial HTML; AJAX takes over on
+        // pagination, sort, and filter changes.
+        $table = new \local_coifish\table\risk_overview('coifish-risk-overview');
+        $filterset = new \local_coifish\table\risk_overview_filterset();
+        $filterset->add_filter(new \core_table\local\filter\integer_filter(
+            'categoryid', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->filterid]
+        ));
+        $filterset->add_filter(new \core_table\local\filter\integer_filter(
+            'cohortid', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->filterid]
+        ));
+        $filterset->add_filter(new \core_table\local\filter\string_filter(
+            'risklevel', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->risklevel]
+        ));
+        $filterset->add_filter(new \core_table\local\filter\string_filter(
+            'enrolstatus', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->enrolstatus]
+        ));
+        $table->set_filterset($filterset);
 
-        // Summary statistics.
-        $data->totalcount = count($students);
-        $data->highcount = 0;
-        $data->moderatecount = 0;
-        foreach ($students as $student) {
-            if ($student['risklevel'] === 'high') {
-                $data->highcount++;
-            } else if ($student['risklevel'] === 'moderate') {
-                $data->moderatecount++;
-            }
-        }
+        ob_start();
+        $table->out(50, false);
+        $data->tablehtml = ob_get_clean();
 
         // Filter dropdown (adapts to mode).
         $filter = filter_helper::get_filter_options($this->filterid);
@@ -96,7 +109,7 @@ class risk_overview implements renderable, templatable {
         $data->filteralllabel = $filter['alllabel'];
         $data->filterparamname = $filter['paramname'];
 
-        // Current filter state.
+        // Current filter state for the URL-bound dropdowns.
         $data->selectedfilter = $this->filterid;
         $data->selectedrisklevel = $this->risklevel;
         $data->isriskall = ($this->risklevel === 'all');

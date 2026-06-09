@@ -55,3 +55,9 @@
 .coifish-kpi-info:hover {
     color: #fff;
 }
+
+/* Historical-trend sparklines on the lecturer profile. */
+.coifish-sparkline {
+    color: #2563eb;
+    flex-shrink: 0;
+}

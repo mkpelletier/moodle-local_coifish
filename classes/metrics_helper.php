@@ -46,17 +46,25 @@ class metrics_helper {
      * — students browsing closed course content months later — does not skew the
      * frozen snapshot used for longitudinal aggregation.
      *
+     * When $starttime > 0, the same queries are bounded below — vital for the
+     * logstore_standard_log queries which can otherwise scan the full log
+     * history on production sites. Callers should pass the course startdate
+     * (or course creation time) so we only look at activity within the course's
+     * actual lifetime.
+     *
      * @param int $courseid Course ID.
      * @param int $userid Student user ID.
      * @param object|null $courseitem The course grade item, or null if absent.
      * @param int $endtime Optional upper bound on timestamps (0 = no bound).
+     * @param int $starttime Optional lower bound on timestamps (0 = no bound).
      * @return array ['grade' => float|null, 'engagement', 'social', 'selfregulation', 'feedbackpct']
      */
     public static function capture_student_metrics(
         int $courseid,
         int $userid,
         ?object $courseitem,
-        int $endtime = 0
+        int $endtime = 0,
+        int $starttime = 0
     ): array {
         global $DB;
 
@@ -71,9 +79,19 @@ class metrics_helper {
             }
         }
 
-        $timeclause = $endtime > 0 ? ' AND l.timecreated <= :endtime' : '';
-        $postclause = $endtime > 0 ? ' AND fp.created <= :endtime' : '';
-        $endparams = $endtime > 0 ? ['endtime' => $endtime] : [];
+        $timeclause = '';
+        $postclause = '';
+        $endparams = [];
+        if ($starttime > 0) {
+            $timeclause .= ' AND l.timecreated >= :starttime';
+            $postclause .= ' AND fp.created >= :starttime';
+            $endparams['starttime'] = $starttime;
+        }
+        if ($endtime > 0) {
+            $timeclause .= ' AND l.timecreated <= :endtime';
+            $postclause .= ' AND fp.created <= :endtime';
+            $endparams['endtime'] = $endtime;
+        }
 
         // Engagement: distinct activities viewed.
         // Drop/keep-aware so optional assignments/quizzes don't inflate the denominator
@@ -134,7 +152,13 @@ class metrics_helper {
             : null;
 
         // Feedback review percentage.
-        $feedbacktimeclause = $endtime > 0 ? ' AND ag.timemodified <= :endtime' : '';
+        $feedbacktimeclause = '';
+        if ($starttime > 0) {
+            $feedbacktimeclause .= ' AND ag.timemodified >= :starttime';
+        }
+        if ($endtime > 0) {
+            $feedbacktimeclause .= ' AND ag.timemodified <= :endtime';
+        }
         $totalfeedback = (int)$DB->count_records_sql(
             "SELECT COUNT(ag.id)
                FROM {assign_grades} ag

@@ -80,38 +80,54 @@ class get_lecturer_time_report extends external_api {
             $lecturerids = $DB->get_fieldset_select('local_coifish_lecturer', 'userid', '');
         }
 
+        if (empty($lecturerids)) {
+            return [];
+        }
+
+        // Bulk-load lecturer user records and their teacher-role course
+        // assignments in two queries instead of N+1 per lecturer.
+        [$uinsql, $uinparams] = $DB->get_in_or_equal($lecturerids, SQL_PARAMS_NAMED, 'uu');
+        $namefields = \core_user\fields::for_name()->get_sql('', false, '', '', false)->selects;
+        $users = $DB->get_records_select('user', "id $uinsql", $uinparams, '', "id, $namefields");
+
+        [$rinsql, $rinparams] = $DB->get_in_or_equal($lecturerids, SQL_PARAMS_NAMED, 'rl');
+        [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql();
+        $assignments = $DB->get_records_sql(
+            "SELECT DISTINCT ra.userid AS lectid, c.id AS courseid, c.fullname AS coursename, c.shortname
+               FROM {role_assignments} ra
+               JOIN {context} ctx ON ctx.id = ra.contextid AND ctx.contextlevel = :ctxlevel
+               JOIN {course} c ON c.id = ctx.instanceid
+              WHERE ra.userid $rinsql
+                AND ra.roleid $trinsql
+                AND c.id != :siteid
+           ORDER BY ra.userid ASC, c.shortname ASC",
+            array_merge(['ctxlevel' => CONTEXT_COURSE, 'siteid' => SITEID], $rinparams, $trparams)
+        );
+        $coursesbylecturer = [];
+        foreach ($assignments as $a) {
+            $coursesbylecturer[(int)$a->lectid][] = $a;
+        }
+
         $rows = [];
         foreach ($lecturerids as $uid) {
-            $user = $DB->get_record('user', ['id' => $uid], 'id, firstname, lastname');
+            $user = $users[$uid] ?? null;
             if (!$user) {
                 continue;
             }
-
-            // Get courses this lecturer teaches.
-            [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql();
-            $courses = $DB->get_records_sql(
-                "SELECT DISTINCT c.id, c.fullname, c.shortname
-                   FROM {role_assignments} ra
-                   JOIN {context} ctx ON ctx.id = ra.contextid AND ctx.contextlevel = :ctxlevel
-                   JOIN {course} c ON c.id = ctx.instanceid
-                  WHERE ra.userid = :uid
-                    AND ra.roleid $trinsql
-                    AND c.id != :siteid",
-                array_merge(['ctxlevel' => CONTEXT_COURSE, 'uid' => $uid, 'siteid' => SITEID], $trparams)
-            );
-
-            foreach ($courses as $course) {
+            $fullname = fullname($user);
+            foreach ($coursesbylecturer[(int)$uid] ?? [] as $course) {
                 $hours = \local_coifish\lecturer_api::estimate_activity_hours(
                     $uid,
-                    [$course->id],
-                    $params['timeto']
+                    [(int)$course->courseid],
+                    (int)$params['timefrom'],
+                    (int)$params['timeto']
                 );
 
                 $rows[] = [
                     'userid' => (int)$uid,
-                    'fullname' => fullname($user),
-                    'courseid' => (int)$course->id,
-                    'coursename' => format_string($course->fullname),
+                    'fullname' => $fullname,
+                    'courseid' => (int)$course->courseid,
+                    'coursename' => format_string($course->coursename),
                     'shortname' => $course->shortname,
                     'hours_marking' => $hours['marking'],
                     'hours_communication' => $hours['communication'],

@@ -138,13 +138,14 @@ class local_coifish_admin_setting_cohortpatterns extends admin_setting {
      * @return string HTML output.
      */
     public function output_html($data, $query = '') {
-        global $DB;
+        global $DB, $OUTPUT, $PAGE;
 
         $cohorts = $DB->get_records('cohort', ['contextid' => context_system::instance()->id], 'name ASC');
         if (empty($cohorts)) {
-            $html = '<div class="alert alert-info">'
-                . get_string('setting_cohortpatterns_nocohorts', 'local_coifish')
-                . '</div>';
+            $html = $OUTPUT->notification(
+                get_string('setting_cohortpatterns_nocohorts', 'local_coifish'),
+                \core\output\notification::NOTIFY_INFO
+            );
             return format_admin_setting($this, $this->visiblename, $html, $this->description, true, '', null, $query);
         }
 
@@ -158,59 +159,30 @@ class local_coifish_admin_setting_cohortpatterns extends admin_setting {
 
         $fullname = $this->get_full_name();
 
-        // Hidden field that carries the JSON value for Moodle's form processor.
-        $html = '<input type="hidden" id="' . $fullname . '" name="' . $fullname . '" value="' . s($data) . '">';
-
-        $html .= '<table class="table table-sm table-bordered" style="max-width: 700px;">';
-        $html .= '<thead class="table-light"><tr>';
-        $html .= '<th style="width: 40px;"></th>';
-        $html .= '<th>' . get_string('setting_cohortpatterns_col_cohort', 'local_coifish') . '</th>';
-        $html .= '<th>' . get_string('setting_cohortpatterns_col_pattern', 'local_coifish') . '</th>';
-        $html .= '</tr></thead><tbody>';
-
+        $cohortrows = [];
         foreach ($cohorts as $cohort) {
-            $cid = $cohort->id;
-            $isenabled = !empty($current[$cid]['enabled']);
-            $pattern = $current[$cid]['pattern'] ?? '';
-            $checked = $isenabled ? ' checked' : '';
-
-            $html .= '<tr>';
-            $html .= '<td class="text-center align-middle">'
-                . '<input type="checkbox" class="form-check-input coifish-cohort-cb" '
-                . 'data-cohortid="' . $cid . '" '
-                . 'name="' . $fullname . '_enabled_' . $cid . '" value="1"' . $checked . '>'
-                . '</td>';
-            $html .= '<td class="align-middle">' . s($cohort->name) . '</td>';
-            $html .= '<td>'
-                . '<input type="text" class="form-control form-control-sm coifish-cohort-pattern" '
-                . 'data-cohortid="' . $cid . '" '
-                . 'name="' . $fullname . '_pattern_' . $cid . '" '
-                . 'value="' . s($pattern) . '" '
-                . 'placeholder="' . get_string('setting_cohortpatterns_placeholder', 'local_coifish') . '">'
-                . '</td>';
-            $html .= '</tr>';
+            $cid = (int)$cohort->id;
+            $cohortrows[] = [
+                'id' => $cid,
+                'name' => format_string($cohort->name),
+                'enabled' => !empty($current[$cid]['enabled']),
+                'pattern' => $current[$cid]['pattern'] ?? '',
+            ];
         }
 
-        $html .= '</tbody></table>';
+        $templatedata = [
+            'fullname' => $fullname,
+            'hiddenvalue' => (string)$data,
+            'colcohort' => get_string('setting_cohortpatterns_col_cohort', 'local_coifish'),
+            'colpattern' => get_string('setting_cohortpatterns_col_pattern', 'local_coifish'),
+            'placeholder' => get_string('setting_cohortpatterns_placeholder', 'local_coifish'),
+            'cohorts' => $cohortrows,
+        ];
 
-        // Inline JS to sync the table state into the hidden field before form submission.
-        $html .= '<script>'
-            . 'document.addEventListener("submit", function(e) {'
-            . '  var form = e.target.closest("form");'
-            . '  if (!form) return;'
-            . '  var hidden = document.getElementById("' . $fullname . '");'
-            . '  if (!hidden) return;'
-            . '  var data = {};'
-            . '  form.querySelectorAll(".coifish-cohort-cb").forEach(function(cb) {'
-            . '    if (cb.checked) {'
-            . '      var cid = cb.getAttribute("data-cohortid");'
-            . '      var patInput = form.querySelector(".coifish-cohort-pattern[data-cohortid=\"" + cid + "\"]");'
-            . '      data[cid] = {"enabled": true, "pattern": patInput ? patInput.value.trim() : ""};'
-            . '    }'
-            . '  });'
-            . '  hidden.value = JSON.stringify(data);'
-            . '});'
-            . '</script>';
+        $html = $OUTPUT->render_from_template('local_coifish/cohort_patterns_setting', $templatedata);
+
+        // Wire the submit-time JSON serialiser via AMD instead of inline script.
+        $PAGE->requires->js_call_amd('local_coifish/cohort_patterns_setting', 'init', [$fullname]);
 
         return format_admin_setting($this, $this->visiblename, $html, $this->description, true, '', null, $query);
     }

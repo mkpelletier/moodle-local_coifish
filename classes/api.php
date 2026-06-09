@@ -93,9 +93,19 @@ class api {
         );
 
         $detaillevel = self::get_detail_level($courseid);
+        if (empty($profiles)) {
+            return [];
+        }
+
+        // Bulk-load matching user records in one query, keyed by id.
+        $profileuserids = array_column(array_values($profiles), 'userid');
+        [$uinsql, $uinparams] = $DB->get_in_or_equal($profileuserids, SQL_PARAMS_NAMED, 'ew');
+        $namefields = \core_user\fields::for_name()->get_sql('', false, '', '', false)->selects;
+        $users = $DB->get_records_select('user', "id $uinsql", $uinparams, '', "id, $namefields");
+
         $warnings = [];
         foreach ($profiles as $profile) {
-            $user = $DB->get_record('user', ['id' => $profile->userid], 'id, firstname, lastname');
+            $user = $users[$profile->userid] ?? null;
             if (!$user) {
                 continue;
             }
@@ -113,21 +123,135 @@ class api {
     }
 
     /**
+     * Defensive upper bound on the number of rows {@see get_risk_overview()}
+     * will return per call. Web service / SIS consumers should paginate via
+     * the dynamic-table webservice instead; this guards against accidental
+     * "fetch everything" misuse.
+     */
+    public const MAX_RISK_OVERVIEW_ROWS = 1000;
+
+    /**
      * Get all at-risk student profiles for the institution-wide risk overview.
+     *
+     * Caps the returned row count at {@see MAX_RISK_OVERVIEW_ROWS} regardless
+     * of how many rows match the filters; the on-screen Student Risk Overview
+     * page renders the data through a paginated dynamic table that fetches
+     * rows page-by-page rather than calling this method.
      *
      * @param int $categoryid Course category filter (0 for all). Ignored in cohort mode.
      * @param string $risklevel Filter: 'all', 'moderate', 'high'.
      * @param array|null $studentids Explicit student ID filter (from cohort mode). Null = no filter.
      * @param string $enrolstatus Enrolment-status filter: 'all', 'current' (has an active enrolment
      *                            in a currently running visible course), or 'notenrolled' (none).
+     * @param int|null $limit Maximum rows to return; null uses MAX_RISK_OVERVIEW_ROWS.
      * @return array Array of formatted profiles with user info.
      */
     public static function get_risk_overview(
         int $categoryid = 0,
         string $risklevel = 'all',
         ?array $studentids = null,
+        string $enrolstatus = 'all',
+        ?int $limit = null
+    ): array {
+        global $DB;
+
+        $built = self::build_risk_overview_query($categoryid, $risklevel, $studentids, $enrolstatus);
+        if ($built === null) {
+            return [];
+        }
+        [$where, $params, $extrajoin] = $built;
+
+        $namefields = \core_user\fields::for_name()->get_sql('u')->selects;
+        $sql = "SELECT DISTINCT p.* $namefields,
+                       CASE p.risklevel WHEN 'high' THEN 1 WHEN 'moderate' THEN 2 ELSE 3 END AS risksort
+                  FROM {local_coifish_profile} p
+                  JOIN {user} u ON u.id = p.userid AND u.deleted = 0
+                  $extrajoin
+                 WHERE $where
+              ORDER BY risksort, p.avggrade ASC";
+
+        $limit = ($limit === null) ? self::MAX_RISK_OVERVIEW_ROWS : max(0, $limit);
+        $records = $DB->get_records_sql($sql, $params, 0, $limit);
+
+        $result = [];
+        foreach ($records as $rec) {
+            $profile = self::format_profile($rec, 'full');
+            $profile['userid'] = (int)$rec->userid;
+            $profile['fullname'] = fullname($rec);
+            $profile['viewurl'] = (new \moodle_url('/local/coifish/studentprofile.php', [
+                'userid' => $rec->userid,
+            ]))->out(false);
+            $result[] = $profile;
+        }
+        return $result;
+    }
+
+    /**
+     * Aggregate counts (total / high / moderate) for the Risk Overview
+     * summary cards. Computed independently of pagination so the numbers
+     * reflect the full filtered population, not just the visible page.
+     *
+     * @param int $categoryid Course category filter (0 for all). Ignored in cohort mode.
+     * @param string $risklevel Filter: 'all', 'moderate', 'high'.
+     * @param array|null $studentids Explicit student ID filter (cohort mode). Null = no filter.
+     * @param string $enrolstatus Enrolment-status filter.
+     * @return array ['total' => int, 'high' => int, 'moderate' => int]
+     */
+    public static function get_risk_overview_counts(
+        int $categoryid = 0,
+        string $risklevel = 'all',
+        ?array $studentids = null,
         string $enrolstatus = 'all'
     ): array {
+        global $DB;
+
+        $zero = ['total' => 0, 'high' => 0, 'moderate' => 0];
+        $built = self::build_risk_overview_query($categoryid, $risklevel, $studentids, $enrolstatus);
+        if ($built === null) {
+            return $zero;
+        }
+        [$where, $params, $extrajoin] = $built;
+
+        $sql = "SELECT p.risklevel, COUNT(DISTINCT p.userid) AS cnt
+                  FROM {local_coifish_profile} p
+                  JOIN {user} u ON u.id = p.userid AND u.deleted = 0
+                  $extrajoin
+                 WHERE $where
+              GROUP BY p.risklevel";
+
+        $rows = $DB->get_records_sql($sql, $params);
+        $out = $zero;
+        foreach ($rows as $row) {
+            $cnt = (int)$row->cnt;
+            $out['total'] += $cnt;
+            if ($row->risklevel === 'high') {
+                $out['high'] = $cnt;
+            } else if ($row->risklevel === 'moderate') {
+                $out['moderate'] = $cnt;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Build the shared WHERE + JOIN + params for the Risk Overview list and
+     * count queries so the two stay aligned.
+     *
+     * Returns null when the filters can be proven to match zero rows (e.g.
+     * a non-existent category, or an explicit student ID list of zero).
+     *
+     * @param int $categoryid
+     * @param string $risklevel
+     * @param array|null $studentids
+     * @param string $enrolstatus
+     * @return array|null [string where, array params, string extrajoin] or null for empty result.
+     */
+    protected static function build_risk_overview_query(
+        int $categoryid,
+        string $risklevel,
+        ?array $studentids,
+        string $enrolstatus
+    ): ?array {
         global $DB;
 
         $conditions = [];
@@ -141,20 +265,18 @@ class api {
             $conditions[] = "p.risklevel IN ('moderate', 'high')";
         }
 
-        // Explicit student ID filter (cohort mode).
         $extrajoin = '';
         if ($studentids !== null) {
             if (empty($studentids)) {
-                return [];
+                return null;
             }
             [$insqlstu, $inparamsstu] = $DB->get_in_or_equal($studentids, SQL_PARAMS_NAMED, 'stu');
             $conditions[] = "p.userid $insqlstu";
             $params = array_merge($params, $inparamsstu);
         } else if ($categoryid > 0) {
-            // Category filter.
             $cat = \core_course_category::get($categoryid, IGNORE_MISSING);
             if (!$cat) {
-                return [];
+                return null;
             }
             $catids = array_merge([$categoryid], $cat->get_all_children_ids());
             [$insql, $inparams] = $DB->get_in_or_equal($catids, SQL_PARAMS_NAMED, 'cat');
@@ -164,8 +286,6 @@ class api {
             $params = array_merge($params, $inparams);
         }
 
-        // Current-enrolment filter. Sources the truth from user_enrolments + course
-        // directly so the filter works even before the active-snapshot task has run.
         if ($enrolstatus === 'current' || $enrolstatus === 'notenrolled') {
             [$cescopefrag, $cescopeparams] = \local_coifish\filter_helper::get_category_scope_sql('ce_c', 'ce_cat');
             $existssql = "EXISTS (
@@ -191,29 +311,7 @@ class api {
             $params = array_merge($params, $cescopeparams);
         }
 
-        $namefields = \core_user\fields::for_name()->get_sql('u')->selects;
-        $where = implode(' AND ', $conditions);
-        $sql = "SELECT DISTINCT p.* $namefields,
-                       CASE p.risklevel WHEN 'high' THEN 1 WHEN 'moderate' THEN 2 ELSE 3 END AS risksort
-                  FROM {local_coifish_profile} p
-                  JOIN {user} u ON u.id = p.userid AND u.deleted = 0
-                  $extrajoin
-                 WHERE $where
-              ORDER BY risksort, p.avggrade ASC";
-
-        $records = $DB->get_records_sql($sql, $params);
-
-        $result = [];
-        foreach ($records as $rec) {
-            $profile = self::format_profile($rec, 'full');
-            $profile['userid'] = (int)$rec->userid;
-            $profile['fullname'] = fullname($rec);
-            $profile['viewurl'] = (new \moodle_url('/local/coifish/studentprofile.php', [
-                'userid' => $rec->userid,
-            ]))->out(false);
-            $result[] = $profile;
-        }
-        return $result;
+        return [implode(' AND ', $conditions), $params, $extrajoin];
     }
 
     /**

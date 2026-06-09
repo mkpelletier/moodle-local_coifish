@@ -203,7 +203,98 @@ class lecturer_profile implements renderable, templatable {
             }
         }
 
+        // Historical trend sparklines. Cached per-week in
+        // local_coifish_lecturer_period_snapshot — populated by the daily
+        // build_lecturer_profiles task and the hourly backfill_lecturer_snapshots
+        // task. Last 26 weeks of data, oldest-first.
+        $snapshots = \local_coifish\lecturer_api::get_lecturer_period_snapshots($this->userid, 26);
+        $data->trends = $this->build_sparkline_data($snapshots);
+        $data->hastrends = !empty($data->trends);
+        $data->trendweeks = count($snapshots);
+
         return $data;
+    }
+
+    /**
+     * Build sparkline-ready point series for each tracked metric.
+     *
+     * Returns one entry per metric for which we have at least 3 data points.
+     * Each entry contains the field name, the rendered SVG <polyline> points
+     * (already in viewBox coordinates), and a label.
+     *
+     * @param array $snapshots Period snapshot rows oldest-first.
+     * @return array
+     */
+    protected function build_sparkline_data(array $snapshots): array {
+        $metrics = [
+            'avgfeedbackquality' => ['label' => 'lecturer_feedback_quality', 'unit' => '%', 'range' => [0, 100]],
+            'avgturnarounddays' => ['label' => 'lecturer_turnaround', 'unit' => 'd', 'range' => null],
+            'avgforumpostspw' => ['label' => 'lecturer_dim_forum_engagement', 'unit' => '/wk', 'range' => null],
+            'interventionsimproved' => ['label' => 'lecturer_dim_intervention_effectiveness', 'unit' => '', 'range' => null],
+            'hours_total' => ['label' => 'lecturer_time_hours', 'unit' => 'h', 'range' => null],
+            'avgstudentgrade' => ['label' => 'lecturer_student_outcomes', 'unit' => '%', 'range' => [0, 100]],
+        ];
+
+        $width = 120;
+        $height = 32;
+        $padx = 2;
+        $pady = 4;
+        $usablew = $width - 2 * $padx;
+        $usableh = $height - 2 * $pady;
+
+        $out = [];
+        foreach ($metrics as $field => $meta) {
+            $values = [];
+            foreach ($snapshots as $s) {
+                $v = $s->$field ?? null;
+                $values[] = ($v === null || $v === '') ? null : (float)$v;
+            }
+            $nonnull = array_values(array_filter($values, function ($v) { return $v !== null; }));
+            if (count($nonnull) < 3) {
+                continue; // Not enough data for a meaningful trend.
+            }
+
+            // Scale to the metric's natural range, or auto-fit if unbounded.
+            if ($meta['range']) {
+                [$lo, $hi] = $meta['range'];
+            } else {
+                $lo = min($nonnull);
+                $hi = max($nonnull);
+                if ($hi - $lo < 1e-6) {
+                    $hi = $lo + 1; // Avoid divide-by-zero on a flat series.
+                }
+            }
+
+            $n = count($values);
+            $points = [];
+            for ($i = 0; $i < $n; $i++) {
+                if ($values[$i] === null) {
+                    continue; // Sparkline skips gaps.
+                }
+                $x = $padx + ($n > 1 ? ($i / ($n - 1)) * $usablew : $usablew / 2);
+                $y = $pady + $usableh - (($values[$i] - $lo) / ($hi - $lo)) * $usableh;
+                $points[] = round($x, 2) . ',' . round($y, 2);
+            }
+            $latest = end($nonnull);
+            $first = reset($nonnull);
+            $deltapct = ($first > 0)
+                ? round((($latest - $first) / $first) * 100)
+                : 0;
+
+            $out[] = [
+                'field' => $field,
+                'label' => get_string($meta['label'], 'local_coifish'),
+                'points' => implode(' ', $points),
+                'width' => $width,
+                'height' => $height,
+                'latest' => is_float($latest) ? round($latest, 1) : $latest,
+                'unit' => $meta['unit'],
+                'deltapct' => $deltapct,
+                'isup' => $deltapct > 0,
+                'isdown' => $deltapct < 0,
+            ];
+        }
+        return $out;
     }
 
     /**

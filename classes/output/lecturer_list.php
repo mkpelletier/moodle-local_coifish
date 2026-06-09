@@ -52,20 +52,27 @@ class lecturer_list implements renderable, templatable {
      * @return \stdClass Template data.
      */
     public function export_for_template(renderer_base $output): \stdClass {
+        global $DB;
         $data = new \stdClass();
 
-        $mode = filter_helper::get_mode();
+        // Render the dynamic table's initial HTML; AJAX takes over on
+        // pagination, sort, and filter changes.
+        $table = new \local_coifish\table\lecturer_list('coifish-lecturer-list');
+        $filterset = new \local_coifish\table\lecturer_list_filterset();
+        $filterset->add_filter(new \core_table\local\filter\integer_filter(
+            'categoryid', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->filterid]
+        ));
+        $filterset->add_filter(new \core_table\local\filter\integer_filter(
+            'cohortid', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->filterid]
+        ));
+        $table->set_filterset($filterset);
 
-        // Get filtered lecturers based on organisation mode.
-        if ($mode === 'cohort') {
-            $lecturerids = filter_helper::get_filtered_lecturer_ids($this->filterid);
-            $lecturers = \local_coifish\lecturer_api::get_all_lecturer_profiles(0, $lecturerids);
-        } else {
-            $lecturers = \local_coifish\lecturer_api::get_all_lecturer_profiles($this->filterid);
-        }
+        ob_start();
+        $table->out(50, false);
+        $data->tablehtml = ob_get_clean();
 
-        $data->lecturers = $lecturers;
-        $data->haslecturers = !empty($lecturers);
+        // Is there *any* lecturer profile data at all? Drives the empty-state alert.
+        $data->haslecturers = $DB->record_exists('local_coifish_lecturer', []);
 
         // Filter dropdown (adapts to mode).
         $filter = filter_helper::get_filter_options($this->filterid);

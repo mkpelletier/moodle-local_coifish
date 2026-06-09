@@ -7,19 +7,27 @@
     to individual lecturer profile pages. Filterable by course category.
 
     Context variables required for this template:
-    * haslecturers (bool) - Whether any lecturer profiles were found.
-    * lecturers (array) - Array of lecturer profile data.
-    * categories (array) - Course categories for filter dropdown.
-    * selectedcategory (int) - Currently selected category ID.
-    * formurl (string) - Form action URL.
+    * haslecturers (bool) - Whether any lecturer profiles exist at all (drives empty state).
+    * tablehtml (string) - Pre-rendered dynamic-table markup (raw HTML).
+    * filteroptions (array) - Options for the category/cohort dropdown.
+    * filterlabel (string) - Dropdown label.
+    * filteralllabel (string) - "All" option label.
+    * filterparamname (string) - Form param name (categoryid or cohortid).
+    * selectedfilter (int) - Currently selected filter ID.
+    * formurl (string) - Filter form action URL.
+    * exporturl (string) - URL to the CSV export page.
 
     Example context (json):
     {
         "haslecturers": true,
-        "lecturers": [],
-        "categories": [],
-        "selectedcategory": 0,
-        "formurl": "/local/coifish/lecturerprofile.php"
+        "tablehtml": "<table>...</table>",
+        "filteroptions": [],
+        "filterlabel": "Course category",
+        "filteralllabel": "All categories",
+        "filterparamname": "categoryid",
+        "selectedfilter": 0,
+        "formurl": "/local/coifish/lecturerprofile.php",
+        "exporturl": "/local/coifish/export.php"
     }
 }}
 <div class="local-coifish-lecturer-list">
@@ -55,49 +63,11 @@
         </a>
     </div>
 
-    {{! Lecturer table }}
+    {{! Lecturer table — paginated, sortable dynamic table; AJAX refresh via core_table/dynamic. }}
     {{#haslecturers}}
     <div class="card">
         <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover table-sm mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th>{{#str}}col_lecturer, local_coifish{{/str}}</th>
-                            <th class="text-center">{{#str}}col_courses, local_coifish{{/str}}</th>
-                            <th class="text-center">{{#str}}lecturer_feedback_quality, local_coifish{{/str}}</th>
-                            <th class="text-center">{{#str}}lecturer_turnaround, local_coifish{{/str}}</th>
-                            <th class="text-center">{{#str}}lecturer_intervention_eff, local_coifish{{/str}}</th>
-                            <th class="text-center">{{#str}}col_student_grade_trend, local_coifish{{/str}}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{#lecturers}}
-                        <tr>
-                            <td>
-                                <a href="{{viewurl}}" class="fw-semibold">
-                                    {{fullname}}
-                                </a>
-                            </td>
-                            <td class="text-center">{{coursecount}}</td>
-                            <td class="text-center">
-                                {{#avgfeedbackquality}}{{avgfeedbackquality}}%{{/avgfeedbackquality}}
-                                {{^avgfeedbackquality}}<span class="text-muted">-</span>{{/avgfeedbackquality}}
-                            </td>
-                            <td class="text-center">
-                                {{#avgturnarounddays}}{{avgturnarounddays}}d{{/avgturnarounddays}}
-                                {{^avgturnarounddays}}<span class="text-muted">-</span>{{/avgturnarounddays}}
-                            </td>
-                            <td class="text-center">
-                                {{#interventioneffectiveness}}{{interventioneffectiveness}}%{{/interventioneffectiveness}}
-                                {{^interventioneffectiveness}}<span class="text-muted">-</span>{{/interventioneffectiveness}}
-                            </td>
-                            <td class="text-center">{{studentgradetrendlabel}}</td>
-                        </tr>
-                        {{/lecturers}}
-                    </tbody>
-                </table>
-            </div>
+            {{{tablehtml}}}
         </div>
     </div>
     {{/haslecturers}}

@@ -1,0 +1,64 @@
+{{!
+    @template local_coifish/cohort_patterns_setting
+
+    Admin setting widget for mapping cohorts to course shortname regex patterns.
+    Renders a table with one row per system cohort containing an enabled
+    checkbox and a pattern text input. A hidden JSON-encoded field carries
+    the combined state to Moodle's form processor; the AMD module
+    local_coifish/cohort_patterns_setting populates that field on submit.
+
+    Context variables required for this template:
+    * fullname (string) - Full setting name (Moodle's settings prefix + key).
+    * hiddenvalue (string) - Current raw JSON value for the hidden input.
+    * colcohort (string) - Localised column header for the cohort name.
+    * colpattern (string) - Localised column header for the pattern input.
+    * placeholder (string) - Localised placeholder text for the pattern input.
+    * cohorts (array) - [{id, name, enabled, pattern}] one row per system cohort.
+
+    Example context (json):
+    {
+        "fullname": "s_local_coifish_cohort_programmes",
+        "hiddenvalue": "{}",
+        "colcohort": "Cohort",
+        "colpattern": "Course shortname pattern (regex)",
+        "placeholder": "e.g. ^THE",
+        "cohorts": [
+            {"id": 12, "name": "Theology PCs", "enabled": true, "pattern": "^THE"}
+        ]
+    }
+}}
+<div class="local-coifish-cohort-patterns">
+    <input type="hidden" id="{{fullname}}" name="{{fullname}}" value="{{hiddenvalue}}">
+    <table class="table table-sm table-bordered" style="max-width: 700px;">
+        <thead class="table-light">
+            <tr>
+                <th style="width: 40px;"></th>
+                <th>{{colcohort}}</th>
+                <th>{{colpattern}}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{#cohorts}}
+            <tr>
+                <td class="text-center align-middle">
+                    <input type="checkbox"
+                           class="form-check-input coifish-cohort-cb"
+                           data-cohortid="{{id}}"
+                           name="{{fullname}}_enabled_{{id}}"
+                           value="1"
+                           {{#enabled}}checked{{/enabled}}>
+                </td>
+                <td class="align-middle">{{name}}</td>
+                <td>
+                    <input type="text"
+                           class="form-control form-control-sm coifish-cohort-pattern"
+                           data-cohortid="{{id}}"
+                           name="{{fullname}}_pattern_{{id}}"
+                           value="{{pattern}}"
+                           placeholder="{{placeholder}}">
+                </td>
+            </tr>
+            {{/cohorts}}
+        </tbody>
+    </table>
+</div>

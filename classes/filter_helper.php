@@ -222,6 +222,114 @@ class filter_helper {
      * @param string $role 'teacher' for lecturers, 'student' for students.
      * @return array User IDs.
      */
+    /** @var array<string,array<int>> Per-request cache keyed by category+pattern. */
+    protected static array $courseidcache = [];
+
+    /**
+     * Resolve a course shortname regex pattern to the list of matching course IDs,
+     * scoped to the configured "Limit course matching to category" admin setting
+     * if it is set.
+     *
+     * Push-down strategy: for simple anchored prefix patterns like "^THE" we
+     * translate to a SQL LIKE so the filter runs in the database. For complex
+     * patterns (alternations, groups, lookarounds, etc.) we fall back to
+     * fetching shortnames in the scope and matching in PHP — but always scoped
+     * to the configured category include rather than the whole site.
+     *
+     * Result is cached per request keyed on category + pattern so repeated
+     * callers (e.g. the risk overview + lecturer list on the same page) don't
+     * recompute.
+     *
+     * @param string $pattern Regex pattern to match against course shortnames.
+     * @return int[] List of matching course IDs (de-duplicated, indexed).
+     */
+    public static function get_course_ids_matching_pattern(string $pattern): array {
+        global $DB;
+
+        if ($pattern === '') {
+            return [];
+        }
+
+        $categoryid = (int)get_config('local_coifish', 'course_category');
+        $cachekey = $categoryid . '|' . $pattern;
+        if (isset(self::$courseidcache[$cachekey])) {
+            return self::$courseidcache[$cachekey];
+        }
+
+        // Build a category-scope SQL fragment (empty if no include configured).
+        $catfrag = '';
+        $catparams = [];
+        if ($categoryid > 0) {
+            $cat = \core_course_category::get($categoryid, IGNORE_MISSING);
+            if ($cat) {
+                $catids = array_merge([$categoryid], $cat->get_all_children_ids());
+                [$catinsql, $catparams] = $DB->get_in_or_equal($catids, SQL_PARAMS_NAMED, 'cscat');
+                $catfrag = " AND category $catinsql";
+            }
+        }
+
+        // Try the SQL-side LIKE fast path for simple anchored prefix patterns
+        // like "^THE", "^BIB", "^MA[0-9]" -> "THE%", "BIB%". Anything containing
+        // regex metacharacters that don't translate cleanly falls through.
+        $likepattern = self::pattern_to_sql_like($pattern);
+        if ($likepattern !== null) {
+            $params = array_merge(['siteid' => SITEID, 'pat' => $likepattern], $catparams);
+            // Case-insensitive LIKE: Moodle's $DB->sql_like(..., false) handles
+            // driver portability.
+            $likeclause = $DB->sql_like('shortname', ':pat', false);
+            $matches = $DB->get_fieldset_sql(
+                "SELECT id FROM {course}
+                  WHERE id != :siteid AND $likeclause $catfrag",
+                $params
+            );
+            $matches = array_values(array_map('intval', $matches));
+            self::$courseidcache[$cachekey] = $matches;
+            return $matches;
+        }
+
+        // Complex pattern fallback: fetch shortnames within the configured
+        // scope only (never the whole site if a category is configured).
+        $params = array_merge(['siteid' => SITEID], $catparams);
+        $courses = $DB->get_records_sql(
+            "SELECT id, shortname FROM {course} WHERE id != :siteid $catfrag",
+            $params
+        );
+
+        $matches = [];
+        $delimited = '/' . $pattern . '/i';
+        foreach ($courses as $course) {
+            // Suppress warnings — pattern validation belongs in the admin setting.
+            if (@preg_match($delimited, $course->shortname)) {
+                $matches[] = (int)$course->id;
+            }
+        }
+        self::$courseidcache[$cachekey] = $matches;
+        return $matches;
+    }
+
+    /**
+     * Translate a simple anchored-prefix regex like "^THE" or "^BIB2"
+     * into a SQL LIKE pattern. Returns null if the pattern contains any
+     * regex metacharacter that we don't safely translate.
+     *
+     * Accepted shape: leading caret followed by 1+ characters drawn only
+     * from [A-Za-z0-9_-]. Everything else (alternations, character
+     * classes, quantifiers, groups, lookarounds, end anchors) falls
+     * through to the PHP-side regex path.
+     *
+     * @param string $pattern Raw regex pattern (no delimiters).
+     * @return string|null SQL LIKE pattern (with trailing %) or null.
+     */
+    protected static function pattern_to_sql_like(string $pattern): ?string {
+        if (!preg_match('/^\^([A-Za-z0-9_-]+)$/', $pattern, $m)) {
+            return null;
+        }
+        // Escape any SQL LIKE metacharacters in the literal prefix (defence in depth;
+        // the regex above already rejects % and _).
+        $prefix = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $m[1]);
+        return $prefix . '%';
+    }
+
     public static function get_users_by_course_pattern(string $pattern, string $role = 'student'): array {
         global $DB;
 
@@ -229,30 +337,7 @@ class filter_helper {
             return [];
         }
 
-        // Get courses, optionally limited to a specific category tree.
-        $categoryid = (int)get_config('local_coifish', 'course_category');
-        if ($categoryid > 0) {
-            $cat = \core_course_category::get($categoryid, IGNORE_MISSING);
-            if ($cat) {
-                $catids = array_merge([$categoryid], $cat->get_all_children_ids());
-                [$catinsql, $catparams] = $DB->get_in_or_equal($catids, SQL_PARAMS_NAMED, 'cc');
-                $allcourses = $DB->get_records_sql(
-                    "SELECT id, shortname FROM {course} WHERE id != :siteid AND category $catinsql",
-                    array_merge(['siteid' => SITEID], $catparams)
-                );
-            } else {
-                $allcourses = $DB->get_records_select('course', 'id != :siteid', ['siteid' => SITEID], '', 'id, shortname');
-            }
-        } else {
-            $allcourses = $DB->get_records_select('course', 'id != :siteid', ['siteid' => SITEID], '', 'id, shortname');
-        }
-        $matchingcourseids = [];
-        foreach ($allcourses as $course) {
-            if (preg_match('/' . $pattern . '/i', $course->shortname)) {
-                $matchingcourseids[] = $course->id;
-            }
-        }
-
+        $matchingcourseids = self::get_course_ids_matching_pattern($pattern);
         if (empty($matchingcourseids)) {
             return [];
         }

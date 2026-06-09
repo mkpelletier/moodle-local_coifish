@@ -81,6 +81,36 @@
         <INDEX NAME="timecomputed" UNIQUE="false" FIELDS="timecomputed"/>
       </INDEXES>
     </TABLE>
+    <TABLE NAME="local_coifish_lecturer_period_snapshot" COMMENT="Per-week historical snapshot of a lecturer's metrics. Written by a daily task for the current ISO week and by a backfill task for missing past weeks. Source of trend visualisations on the lecturer profile.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Lecturer user ID"/>
+        <FIELD NAME="periodstart" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Unix timestamp of period start (Mon 00:00, ISO week)"/>
+        <FIELD NAME="periodend" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Unix timestamp of period end (Sun 23:59:59)"/>
+        <FIELD NAME="coursecount" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Distinct courses the lecturer was active in during this period"/>
+        <FIELD NAME="avgfeedbackquality" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="avgcoverage" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="avgdepth" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="avgpersonalisation" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="avgturnarounddays" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="avgforumpostspw" TYPE="number" LENGTH="5" DECIMALS="1" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="hours_marking" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="hours_communication" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="hours_livesessions" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="hours_total" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="totalinterventions" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="interventionsimproved" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="avgstudentgrade" TYPE="number" LENGTH="7" DECIMALS="2" NOTNULL="false" SEQUENCE="false" COMMENT="Avg final grade for courses that ENDED in this period (sparse)"/>
+        <FIELD NAME="timecomputed" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="userid_periodstart" UNIQUE="true" FIELDS="userid, periodstart"/>
+        <INDEX NAME="periodstart" UNIQUE="false" FIELDS="periodstart"/>
+      </INDEXES>
+    </TABLE>
     <TABLE NAME="local_coifish_lecturer" COMMENT="Aggregated lecturer performance profile across courses, built by scheduled task.">
       <FIELDS>
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>

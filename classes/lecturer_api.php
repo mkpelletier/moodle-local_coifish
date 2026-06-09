@@ -49,7 +49,13 @@ class lecturer_api {
             return [];
         }
 
-        $user = $DB->get_record('user', ['id' => $userid], 'id, firstname, lastname, email');
+        // Include all name fields so fullname() doesn't trigger Moodle 5.x
+        // "missing name fields" debugging notices.
+        $namefields = \core_user\fields::for_name()->get_sql('', false, '', '', false)->selects;
+        $user = $DB->get_record_sql(
+            "SELECT id, email, $namefields FROM {user} WHERE id = :id",
+            ['id' => $userid]
+        );
         if (!$user) {
             return [];
         }
@@ -198,8 +204,11 @@ class lecturer_api {
         $rangeweeks = max(1, ($timeto - ($timefrom ?: $timeto - 120 * 86400)) / (7 * 86400));
         $avgforumpostspw = round($totalposts / $rangeweeks, 1);
 
-        // Activity time estimation within date range.
-        $hours = self::estimate_activity_hours($userid, $courseids, $timeto ?: time());
+        // Activity time estimation within date range. Defaults: lower bound 120
+        // days back from $timeto if no $timefrom given, to keep log scans bounded.
+        $hto = $timeto ?: time();
+        $hfrom = $timefrom > 0 ? $timefrom : ($hto - 120 * 86400);
+        $hours = self::estimate_activity_hours($userid, $courseids, $hfrom, $hto);
 
         // Student outcome — use all-time from cache as it needs course completion data.
         $cached = $DB->get_record('local_coifish_lecturer', ['userid' => $userid]);
@@ -295,9 +304,19 @@ class lecturer_api {
             $records = $DB->get_records('local_coifish_lecturer', null, 'coursecount DESC');
         }
 
+        if (empty($records)) {
+            return [];
+        }
+
+        // Bulk-load user records (name + email) for every lecturer in one query.
+        $userids = array_column(array_values($records), 'userid');
+        [$uinsql, $uinparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'lu');
+        $namefields = \core_user\fields::for_name()->get_sql('', false, '', '', false)->selects;
+        $users = $DB->get_records_select('user', "id $uinsql", $uinparams, '', "id, email, $namefields");
+
         $result = [];
         foreach ($records as $record) {
-            $user = $DB->get_record('user', ['id' => $record->userid], 'id, firstname, lastname, email');
+            $user = $users[$record->userid] ?? null;
             if ($user) {
                 $result[] = self::format_profile($record, $user, false);
             }
@@ -443,8 +462,10 @@ class lecturer_api {
                 : null;
             $studentgradetrend = self::compute_trend(array_values($gradevalues));
 
-            // Estimate time spent on activities.
-            $hours = self::estimate_activity_hours($uid, $courseids, $now);
+            // Estimate time spent on activities. The daily cron looks back
+            // 120 days so the log scan stays small and the smoothed average
+            // still reflects recent (vs all-time) teaching activity.
+            $hours = self::estimate_activity_hours($uid, $courseids, $now - 120 * 86400, $now);
 
             // Compute strengths and focus areas.
             $dimensions = [
@@ -496,7 +517,38 @@ class lecturer_api {
             } else {
                 $DB->insert_record('local_coifish_lecturer', (object)$record);
             }
+
+            // Also write a snapshot for the current ISO week so the trend
+            // visualisation on the lecturer profile has the latest data point.
+            // Backfill of older weeks is handled by a separate task.
+            [$wstart, $wend] = \local_coifish\lecturer_period_snapshot::week_bounds($now);
+            \local_coifish\lecturer_period_snapshot::upsert($uid, $wstart, $wend);
         }
+    }
+
+    /**
+     * Read the most recent N weekly snapshots for one lecturer, oldest-first.
+     * Single indexed query against the per-period snapshot table — no log
+     * scan, no per-week computation.
+     *
+     * @param int $userid Lecturer user ID.
+     * @param int $weeks Number of recent weeks to return (default 26).
+     * @return array Ordered array of snapshot row stdClass objects.
+     */
+    public static function get_lecturer_period_snapshots(int $userid, int $weeks = 26): array {
+        global $DB;
+        $weeks = max(1, min(520, $weeks));
+        $now = time();
+        $fromts = $now - ($weeks + 1) * 7 * 86400;
+        return array_values($DB->get_records_select(
+            'local_coifish_lecturer_period_snapshot',
+            'userid = :uid AND periodstart >= :fts',
+            ['uid' => $userid, 'fts' => $fromts],
+            'periodstart ASC',
+            '*',
+            0,
+            $weeks
+        ));
     }
 
     /** @var int Maximum gap in seconds between events to be considered the same session. */
@@ -513,17 +565,36 @@ class lecturer_api {
      *
      * @param int $uid Lecturer user ID.
      * @param array $courseids Course IDs the lecturer teaches.
-     * @param int $now Current timestamp.
+     * @param int $timefrom Lower bound on event timestamps (0 = no lower bound).
+     *                      Critical for {logstore_standard_log} performance: pass the
+     *                      smallest course-startdate in $courseids, or the daily-task
+     *                      lookback window, to avoid full-history scans.
+     * @param int $timeto Upper bound on event timestamps (0 = use time()).
      * @return array ['marking' => float, 'communication' => float, 'livesessions' => float, 'total' => float]
      */
-    public static function estimate_activity_hours(int $uid, array $courseids, int $now): array {
+    public static function estimate_activity_hours(int $uid, array $courseids, int $timefrom, int $timeto = 0): array {
         global $DB;
 
         if (empty($courseids)) {
             return ['marking' => 0, 'communication' => 0, 'livesessions' => 0, 'total' => 0];
         }
 
+        if ($timeto <= 0) {
+            $timeto = time();
+        }
+
         [$insql, $inparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'crs');
+
+        // Time bounds applied to every logstore_standard_log query below — without
+        // them a production-scale log table can take seconds to scan per call.
+        $timeclause = '';
+        $timeparams = [];
+        if ($timefrom > 0) {
+            $timeclause .= ' AND timecreated >= :tfrom';
+            $timeparams['tfrom'] = $timefrom;
+        }
+        $timeclause .= ' AND timecreated <= :tto';
+        $timeparams['tto'] = $timeto;
 
         // 1. Marking & feedback events.
         $markingevents = $DB->get_fieldset_sql(
@@ -538,21 +609,39 @@ class lecturer_api {
                     OR (component = 'local_unifiedgrader')
                     OR (component = 'assignfeedback_comments' AND action = 'created')
                 )
+                $timeclause
            ORDER BY timecreated ASC",
-            array_merge(['uid' => $uid], $inparams)
+            array_merge(['uid' => $uid], $inparams, $timeparams)
         );
 
-        // Also include unified grader annotation timestamps if available.
+        // Also include unified grader annotation timestamps if available (same time window).
+        // Moodle DML requires each named placeholder to appear exactly once per SQL
+        // statement, so each UNION branch gets its own :tfromN / :ttoN names.
         $dbman = $DB->get_manager();
         if ($dbman->table_exists('local_unifiedgrader_annot')) {
+            $ugparams = ['uid' => $uid, 'uid2' => $uid, 'uid3' => $uid];
+            $build = function (string $column, string $suffix) use ($timefrom, $timeto, &$ugparams): string {
+                $clause = '';
+                if ($timefrom > 0) {
+                    $clause .= " AND $column >= :tfrom$suffix";
+                    $ugparams["tfrom$suffix"] = $timefrom;
+                }
+                $clause .= " AND $column <= :tto$suffix";
+                $ugparams["tto$suffix"] = $timeto;
+                return $clause;
+            };
+            $cl1 = $build('timecreated', '1');
+            $cl2 = $build('timemodified', '2');
+            $cl3 = $build('timecreated', '3');
             $ugannot = $DB->get_fieldset_sql(
-                "SELECT timecreated FROM {local_unifiedgrader_annot} WHERE authorid = :uid
+                "SELECT timecreated FROM {local_unifiedgrader_annot} WHERE authorid = :uid $cl1
                  UNION ALL
-                 SELECT timemodified FROM {local_unifiedgrader_annot} WHERE authorid = :uid2 AND timemodified > 0
+                 SELECT timemodified FROM {local_unifiedgrader_annot}
+                       WHERE authorid = :uid2 AND timemodified > 0 $cl2
                  UNION ALL
-                 SELECT timecreated FROM {local_unifiedgrader_scomm} WHERE authorid = :uid3
+                 SELECT timecreated FROM {local_unifiedgrader_scomm} WHERE authorid = :uid3 $cl3
                  ORDER BY 1 ASC",
-                ['uid' => $uid, 'uid2' => $uid, 'uid3' => $uid]
+                $ugparams
             );
             $markingevents = array_merge($markingevents, $ugannot);
             sort($markingevents);
@@ -570,8 +659,9 @@ class lecturer_api {
                     OR (component = 'core' AND target = 'course_module' AND action = 'viewed'
                         AND objecttable = 'forum')
                 )
+                $timeclause
            ORDER BY timecreated ASC",
-            array_merge(['uid' => $uid], $inparams)
+            array_merge(['uid' => $uid], $inparams, $timeparams)
         );
 
         // 3. Live session events (BigBlueButton).

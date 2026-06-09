@@ -7,32 +7,42 @@
     and links to individual student drill-down profiles.
 
     Context variables required for this template:
-    * hasstudents (bool) - Whether any at-risk students were found.
-    * students (array) - Array of student risk profile data.
-    * totalcount (int) - Total number of at-risk students.
-    * highcount (int) - Number of high-risk students.
-    * moderatecount (int) - Number of moderate-risk students.
-    * categories (array) - Course categories for filter dropdown.
-    * selectedcategory (int) - Currently selected category ID.
+    * hasstudents (bool) - Whether any at-risk students matched the filters.
+    * totalcount (int) - Total at-risk count across the filtered population.
+    * highcount (int) - High-risk count.
+    * moderatecount (int) - Moderate-risk count.
+    * tablehtml (string) - Pre-rendered dynamic-table markup (raw HTML).
+    * filteroptions (array) - Options for the category/cohort dropdown.
+    * filterlabel (string) - Dropdown label.
+    * filteralllabel (string) - "All" option label.
+    * filterparamname (string) - Form param name (categoryid or cohortid).
+    * selectedfilter (int) - Currently selected category/cohort ID.
     * selectedrisklevel (string) - Currently selected risk level.
-    * isriskall (bool) - Whether 'all' risk level is selected.
-    * isriskhigh (bool) - Whether 'high' risk level is selected.
-    * isriskmoderate (bool) - Whether 'moderate' risk level is selected.
-    * formurl (string) - Form action URL.
+    * isriskall / isriskhigh / isriskmoderate (bool) - Which risk option is selected.
+    * selectedenrolstatus (string) - Currently selected enrolment status.
+    * isenrolall / isenrolcurrent / isenrolnotenrolled (bool) - Which enrol option is selected.
+    * formurl (string) - Filter form action URL.
 
     Example context (json):
     {
         "hasstudents": true,
-        "students": [],
         "totalcount": 12,
         "highcount": 5,
         "moderatecount": 7,
-        "categories": [],
-        "selectedcategory": 0,
+        "tablehtml": "<table>...</table>",
+        "filteroptions": [],
+        "filterlabel": "Course category",
+        "filteralllabel": "All categories",
+        "filterparamname": "categoryid",
+        "selectedfilter": 0,
         "selectedrisklevel": "all",
         "isriskall": true,
         "isriskhigh": false,
         "isriskmoderate": false,
+        "selectedenrolstatus": "current",
+        "isenrolall": false,
+        "isenrolcurrent": true,
+        "isenrolnotenrolled": false,
         "formurl": "/local/coifish/index.php"
     }
 }}
@@ -109,61 +119,11 @@
         </div>
     </div>
 
-    {{! Student table }}
+    {{! Student table — paginated, sortable dynamic table; AJAX refresh via core_table/dynamic. }}
     {{#hasstudents}}
     <div class="card">
         <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover table-sm mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th>{{#str}}col_student, local_coifish{{/str}}</th>
-                            <th class="text-center">{{#str}}col_risk, local_coifish{{/str}}</th>
-                            <th>{{#str}}col_risk_factors, local_coifish{{/str}}</th>
-                            <th>{{#str}}col_engagement, local_coifish{{/str}}</th>
-                            <th>{{#str}}col_grade_trend, local_coifish{{/str}}</th>
-                            <th>{{#str}}col_intervention_response, local_coifish{{/str}}</th>
-                            <th class="text-center">{{#str}}col_courses, local_coifish{{/str}}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{#students}}
-                        <tr>
-                            <td>
-                                <a href="{{viewurl}}" class="fw-semibold">
-                                    {{fullname}}
-                                </a>
-                            </td>
-                            <td class="text-center">
-                                <span class="badge {{#isriskhigh}}bg-danger{{/isriskhigh}}{{#isriskmoderate}}bg-warning text-dark{{/isriskmoderate}}">
-                                    {{risklabel}}
-                                </span>
-                            </td>
-                            <td>
-                                {{#hasriskfactors}}
-                                    {{#riskfactors}}
-                                        <span class="badge bg-secondary me-1 mb-1">{{.}}</span>
-                                    {{/riskfactors}}
-                                {{/hasriskfactors}}
-                                {{^hasriskfactors}}
-                                    <span class="text-muted">-</span>
-                                {{/hasriskfactors}}
-                            </td>
-                            <td>{{engagementpatternlabel}}</td>
-                            <td>
-                                {{#gradetrendlabel}}{{gradetrendlabel}}{{/gradetrendlabel}}
-                                {{^gradetrendlabel}}<span class="text-muted">-</span>{{/gradetrendlabel}}
-                            </td>
-                            <td>
-                                {{#interventionresponselabel}}{{interventionresponselabel}}{{/interventionresponselabel}}
-                                {{^interventionresponselabel}}<span class="text-muted">-</span>{{/interventionresponselabel}}
-                            </td>
-                            <td class="text-center">{{coursescompleted}}</td>
-                        </tr>
-                        {{/students}}
-                    </tbody>
-                </table>
-            </div>
+            {{{tablehtml}}}
         </div>
     </div>
     {{/hasstudents}}

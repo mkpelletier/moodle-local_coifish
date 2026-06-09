@@ -73,19 +73,27 @@ $skipped = 0;
 $nodata = 0;
 $inscopeids = [];
 
+// Pre-load all this user's existing snapshot rows in one query so the loop
+// below does in-memory lookups instead of issuing get_record per course.
+$existingbycourse = $DB->get_records(
+    'local_coifish_active_snapshot',
+    ['userid' => $userid],
+    '',
+    'courseid, id, timecomputed'
+);
+
 foreach ($courses as $course) {
     $inscopeids[] = (int)$course->id;
-    $existing = $DB->get_record('local_coifish_active_snapshot', [
-        'userid' => $userid,
-        'courseid' => $course->id,
-    ], 'id, timecomputed');
+    $existing = $existingbycourse[$course->id] ?? null;
 
     if ($existing && ((int)$existing->timecomputed) > ($now - $throttle)) {
         $skipped++;
         continue;
     }
 
-    $ok = \local_coifish\task\build_active_snapshots::refresh_one($course, $userid, null, null, $now);
+    $ok = \local_coifish\task\build_active_snapshots::refresh_one(
+        $course, $userid, null, null, $now, $existing
+    );
     if ($ok) {
         $refreshed++;
     } else {

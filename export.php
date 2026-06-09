@@ -110,62 +110,9 @@ $PAGE->navbar->add(get_string('export_title', 'local_coifish'));
 
 echo $OUTPUT->header();
 
-echo '<div class="mb-4">';
-echo '<h4><i class="fa fa-download me-2"></i>' . get_string('export_title', 'local_coifish') . '</h4>';
-echo '<p class="text-muted">' . get_string('export_desc', 'local_coifish') . '</p>';
-echo '</div>';
+$renderable = new \local_coifish\output\export_form($datefrom, $dateto, $cohortid);
+echo $OUTPUT->render_from_template('local_coifish/export_form', $renderable->export_for_template($OUTPUT));
 
-echo '<form method="get" action="' . (new moodle_url('/local/coifish/export.php'))->out(true) . '">';
-echo '<input type="hidden" name="download" value="1">';
-echo '<input type="hidden" name="sesskey" value="' . s(sesskey()) . '">';
-
-// Cohort filter for cohort mode.
-$mode = \local_coifish\filter_helper::get_mode();
-if ($mode === 'cohort') {
-    $filter = \local_coifish\filter_helper::get_filter_options($cohortid);
-    echo '<div class="form-group row mb-3">';
-    echo '  <label class="col-md-2 col-form-label">' . $filter['label'] . '</label>';
-    echo '  <div class="col-md-4">';
-    echo '    <select name="cohortid" class="form-select">';
-    echo '      <option value="0">' . $filter['alllabel'] . '</option>';
-    foreach ($filter['options'] as $opt) {
-        $sel = $opt['selected'] ? ' selected' : '';
-        echo '      <option value="' . $opt['id'] . '"' . $sel . '>' . s($opt['name']) . '</option>';
-    }
-    echo '    </select>';
-    echo '  </div>';
-    echo '</div>';
-}
-
-echo '<div class="form-group row mb-3">';
-echo '  <label class="col-md-2 col-form-label" for="export-datefrom">'
-    . get_string('lecturer_filter_from', 'local_coifish') . '</label>';
-echo '  <div class="col-md-4">';
-echo '    <input type="date" class="form-control" id="export-datefrom" name="datefrom" '
-    . 'value="' . s($datefrom) . '" required>';
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="form-group row mb-3">';
-echo '  <label class="col-md-2 col-form-label" for="export-dateto">'
-    . get_string('lecturer_filter_to', 'local_coifish') . '</label>';
-echo '  <div class="col-md-4">';
-echo '    <input type="date" class="form-control" id="export-dateto" name="dateto" '
-    . 'value="' . s($dateto) . '" required>';
-echo '  </div>';
-echo '</div>';
-
-echo '<div class="form-group row">';
-echo '  <div class="col-md-6">';
-echo '    <button type="submit" class="btn btn-primary">';
-echo '      <i class="fa fa-download me-1"></i>' . get_string('export_download', 'local_coifish');
-echo '    </button>';
-echo '    <a href="' . (new moodle_url('/local/coifish/lecturerprofile.php'))->out(true)
-    . '" class="btn btn-outline-secondary ms-2">' . get_string('cancel') . '</a>';
-echo '  </div>';
-echo '</div>';
-
-echo '</form>';
 echo $OUTPUT->footer();
 
 /**
@@ -194,50 +141,64 @@ function local_coifish_generate_export_data(?array $lecturerids, int $timefrom, 
         return [];
     }
 
-    $rows = [];
+    // Bulk-load lecturer user records in one query keyed by userid.
+    $allids = array_column(array_values($lecturers), 'userid');
+    [$uinsql, $uinparams] = $DB->get_in_or_equal($allids, SQL_PARAMS_NAMED, 'uu');
+    $namefields = \core_user\fields::for_name()->get_sql('', false, '', '', false)->selects;
+    $users = $DB->get_records_select('user', "id $uinsql", $uinparams, '', "id, $namefields");
 
+    // Bulk-load all teacher role assignments for these lecturers in one query.
+    [$rinsql, $rinparams] = $DB->get_in_or_equal($allids, SQL_PARAMS_NAMED, 'rl');
+    [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql();
+    $assignments = $DB->get_records_sql(
+        "SELECT DISTINCT ra.userid AS lectid, c.id AS courseid, c.fullname AS coursename, c.shortname
+           FROM {role_assignments} ra
+           JOIN {context} ctx ON ctx.id = ra.contextid AND ctx.contextlevel = :ctxlevel
+           JOIN {course} c ON c.id = ctx.instanceid
+          WHERE ra.userid $rinsql
+            AND ra.roleid $trinsql
+            AND c.id != :siteid
+       ORDER BY ra.userid ASC, c.shortname ASC",
+        array_merge(['ctxlevel' => CONTEXT_COURSE, 'siteid' => SITEID], $rinparams, $trparams)
+    );
+
+    // Group courses by lecturer id.
+    $coursesbylecturer = [];
+    foreach ($assignments as $a) {
+        $coursesbylecturer[(int)$a->lectid][] = $a;
+    }
+
+    // Programme scoping pattern (same for every row, so compute once).
+    $pattern = '';
+    if (!is_siteadmin()) {
+        $pattern = \local_coifish\filter_helper::get_user_course_pattern();
+    }
+
+    $rows = [];
     foreach ($lecturers as $lecturer) {
-        $user = $DB->get_record('user', ['id' => $lecturer->userid], 'id, firstname, lastname');
+        $user = $users[$lecturer->userid] ?? null;
         if (!$user) {
             continue;
         }
         $fullname = fullname($user);
 
-        // Get courses this lecturer teaches.
-        [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql();
-        $courses = $DB->get_records_sql(
-            "SELECT DISTINCT c.id, c.fullname, c.shortname
-               FROM {role_assignments} ra
-               JOIN {context} ctx ON ctx.id = ra.contextid AND ctx.contextlevel = :ctxlevel
-               JOIN {course} c ON c.id = ctx.instanceid
-              WHERE ra.userid = :uid
-                AND ra.roleid $trinsql
-                AND c.id != :siteid
-           ORDER BY c.shortname ASC",
-            array_merge(['ctxlevel' => CONTEXT_COURSE, 'uid' => $lecturer->userid, 'siteid' => SITEID], $trparams)
-        );
-
-        // Apply programme scoping for non-admins.
-        $pattern = '';
-        if (!is_siteadmin()) {
-            $pattern = \local_coifish\filter_helper::get_user_course_pattern();
-        }
-
+        $courses = $coursesbylecturer[(int)$lecturer->userid] ?? [];
         foreach ($courses as $course) {
             if (!empty($pattern) && !preg_match('/' . $pattern . '/i', $course->shortname)) {
                 continue;
             }
 
-            // Compute time for this specific course in the date range.
+            // Compute time for this specific course in the user's chosen date range.
             $hours = \local_coifish\lecturer_api::estimate_activity_hours(
                 $lecturer->userid,
-                [$course->id],
+                [$course->courseid],
+                $timefrom,
                 $timeto
             );
 
             $rows[] = [
                 'fullname' => $fullname,
-                'coursename' => format_string($course->fullname),
+                'coursename' => format_string($course->coursename),
                 'shortname' => $course->shortname,
                 'marking' => $hours['marking'],
                 'communication' => $hours['communication'],

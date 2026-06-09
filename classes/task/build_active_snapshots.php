@@ -121,8 +121,18 @@ class build_active_snapshots extends scheduled_task {
 
         $termlabel = metrics_helper::resolve_term_label($course);
 
+        // Pre-load any existing rows for this course in one query so refresh_one
+        // doesn't issue a get_record per student (N+1 on large courses).
+        $existingbyuser = $DB->get_records(
+            'local_coifish_active_snapshot',
+            ['courseid' => (int)$course->id],
+            '',
+            'userid, id'
+        );
+
         foreach ($studentids as $userid) {
-            self::refresh_one($course, $userid, $courseitem, $termlabel, $now);
+            $existing = $existingbyuser[$userid] ?? null;
+            self::refresh_one($course, $userid, $courseitem, $termlabel, $now, $existing);
         }
     }
 
@@ -136,6 +146,9 @@ class build_active_snapshots extends scheduled_task {
      * @param object|null $courseitem Course grade item (re-fetched if null).
      * @param string|null $termlabel Pre-resolved term label, or null to resolve here.
      * @param int|null $now Timestamp; defaults to time().
+     * @param object|null $existing Pre-fetched existing row (must have `id` field) to avoid
+     *                              an extra get_record. Pass null to look up here. Pass false-y
+     *                              if no existing row is expected.
      * @return bool True if a row was written, false if metrics could not be captured.
      */
     public static function refresh_one(
@@ -143,7 +156,8 @@ class build_active_snapshots extends scheduled_task {
         int $userid,
         ?object $courseitem = null,
         ?string $termlabel = null,
-        ?int $now = null
+        ?int $now = null,
+        ?object $existing = null
     ): bool {
         global $DB;
 
@@ -159,7 +173,14 @@ class build_active_snapshots extends scheduled_task {
             ]) ?: null;
         }
 
-        $metrics = metrics_helper::capture_student_metrics((int)$course->id, $userid, $courseitem);
+        // Lower-bound logstore scans at the course start date.
+        $metrics = metrics_helper::capture_student_metrics(
+            (int)$course->id,
+            $userid,
+            $courseitem,
+            0,
+            (int)($course->startdate ?? 0)
+        );
 
         if ($termlabel === null) {
             $termlabel = metrics_helper::resolve_term_label($course);
@@ -180,10 +201,8 @@ class build_active_snapshots extends scheduled_task {
             'timecomputed' => $now,
         ];
 
-        $existing = $DB->get_record('local_coifish_active_snapshot', [
-            'userid' => $userid,
-            'courseid' => (int)$course->id,
-        ], 'id');
+        // Callers must pre-load the existing row (or pass null if there isn't one)
+        // so we avoid a get_record per call inside a per-student loop.
         if ($existing) {
             $row->id = $existing->id;
             $DB->update_record('local_coifish_active_snapshot', $row);
