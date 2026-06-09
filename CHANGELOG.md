@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.4.0] - 2026-06-09
+
+### Added
+- **Historical lecturer-activity trends** with weekly per-lecturer caching. A new `local_coifish_lecturer_period_snapshot` table holds one row per lecturer per ISO week. The existing daily task writes the current week's row; a new hourly `backfill_lecturer_snapshots` task fills missing past weeks at a bounded rate per run (default 50/run) until the configured horizon is met. Past weeks are written exactly once and never recomputed — read path on the lecturer profile is a single indexed SELECT, no log scans.
+- **"Historical trends" card** on the lecturer profile rendering inline SVG sparklines (no chart-library dependency) for feedback quality, grading turnaround, forum posts per week, intervention effectiveness, hours total, and average student grade. Each sparkline shows the latest value with a Δ% vs the window start.
+- **Admin setting `lecturer_backfill_years`** (default 3, range 1–10) controls how far back the historical backfill goes.
+- **Dynamic paginated tables** on Student Risk Overview and Lecturer list using Moodle's `core_table\dynamic` API. AJAX pagination, sortable columns, and configurable page size. Summary count cards (high/moderate/total) move to a separate aggregate query so the numbers reflect the full filtered population rather than just the visible page.
+- **Defensive hard cap** (`MAX_RISK_OVERVIEW_ROWS = 1000`) on `api::get_risk_overview()` to guard programmatic / web-service callers against accidentally pulling unbounded result sets.
+
+### Changed
+- **Risk Overview filter dropdowns** preserved as URL state but the table itself now refreshes via AJAX. Bookmarks with existing `?categoryid=…&risklevel=…&enrolstatus=…` continue to work.
+- **`metrics_helper::capture_student_metrics()`** signature gains a `$starttime` parameter applied to the three `logstore_standard_log` queries (engagement, feedback view, self-regulation) plus the `forum_posts` and `assign_grades` time-bounded supporting queries. Callers populate from the course start date.
+- **`lecturer_api::estimate_activity_hours()`** signature changed from `(uid, courseids, $now)` to `(uid, courseids, $timefrom, $timeto)` with both bounds applied to the marking and communication `logstore_standard_log` queries. Callers pass either the user-selected date range or a 120-day cron lookback. Each UNION branch in the `local_unifiedgrader` fallback now uses unique `:tfromN`/`:ttoN` placeholders.
+- **Cohort programme pattern resolution** factored into `filter_helper::get_course_ids_matching_pattern()`. Simple anchored patterns (`^THE`, `^BIB2`) translate to SQL `LIKE 'THE%'` and run server-side. Complex patterns fall back to a category-scoped PHP regex pass — never the whole `course` table. Per-request memoisation cache included.
+- **Renderables transitioned to the Output API.** The CSV export form's PHP-echoed HTML moved to `templates/export_form.mustache` with a new `\local_coifish\output\export_form` renderable. The cohort-programme admin setting's inline `<script>` and HTML moved to `templates/cohort_patterns_setting.mustache` + `amd/src/cohort_patterns_setting.js` loaded via `$PAGE->requires->js_call_amd()`. No remaining PHP-built HTML strings or inline JS in the plugin.
+
+### Fixed
+- **N+1 query patterns eliminated** in seven hot paths by bulk-loading users and existing snapshot rows ahead of loops. `refreshcurrent.php` pre-loads the student's existing active-snapshot rows; `build_active_snapshots::refresh_course()` does the same per-course; `build_profiles::snapshot_course()` pre-loads existing userids via `get_fieldset_select`; `api::get_early_warnings()`, `lecturer_api::get_all_lecturer_profiles()`, `local_coifish_generate_export_data()`, and `external\get_lecturer_time_report` all bulk-load user records using `\core_user\fields::for_name()`. The two lecturer-time call sites also bulk-load `(lecturer, course)` role assignments in one query. Query counts now constant per page render.
+- **`logstore_standard_log` queries no longer scan unbounded history.** All five queries in the plugin apply strict time bounds aligned with the table's shipped `course-time` and `user-module` indexes (both ending in `timecreated`), turning range scans into index seeks. Addresses peer-reviewer concern about production log-table size.
+- **`get_lecturer_profile()` no longer triggers Moodle 5.x "missing name fields" debugging notices.** User record fetch now uses `\core_user\fields::for_name()` so all fullname-relevant columns (including phonetic and alternate names) are present on the object passed to `fullname()`.
+
 ## [1.3.4] - 2026-05-20
 
 ### Changed
