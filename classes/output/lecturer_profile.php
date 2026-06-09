@@ -249,7 +249,9 @@ class lecturer_profile implements renderable, templatable {
                 $v = $s->$field ?? null;
                 $values[] = ($v === null || $v === '') ? null : (float)$v;
             }
-            $nonnull = array_values(array_filter($values, function ($v) { return $v !== null; }));
+            $nonnull = array_values(array_filter($values, function ($v) {
+                return $v !== null;
+            }));
             if (count($nonnull) < 3) {
                 continue; // Not enough data for a meaningful trend.
             }

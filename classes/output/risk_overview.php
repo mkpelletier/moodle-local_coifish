@@ -72,7 +72,10 @@ class risk_overview implements renderable, templatable {
             $counts = \local_coifish\api::get_risk_overview_counts(0, $this->risklevel, $studentids, $this->enrolstatus);
         } else {
             $counts = \local_coifish\api::get_risk_overview_counts(
-                $this->filterid, $this->risklevel, null, $this->enrolstatus
+                $this->filterid,
+                $this->risklevel,
+                null,
+                $this->enrolstatus
             );
         }
         $data->totalcount = $counts['total'];
@@ -85,16 +88,24 @@ class risk_overview implements renderable, templatable {
         $table = new \local_coifish\table\risk_overview('coifish-risk-overview');
         $filterset = new \local_coifish\table\risk_overview_filterset();
         $filterset->add_filter(new \core_table\local\filter\integer_filter(
-            'categoryid', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->filterid]
+            'categoryid',
+            \core_table\local\filter\filter::JOINTYPE_DEFAULT,
+            [$this->filterid]
         ));
         $filterset->add_filter(new \core_table\local\filter\integer_filter(
-            'cohortid', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->filterid]
+            'cohortid',
+            \core_table\local\filter\filter::JOINTYPE_DEFAULT,
+            [$this->filterid]
         ));
         $filterset->add_filter(new \core_table\local\filter\string_filter(
-            'risklevel', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->risklevel]
+            'risklevel',
+            \core_table\local\filter\filter::JOINTYPE_DEFAULT,
+            [$this->risklevel]
         ));
         $filterset->add_filter(new \core_table\local\filter\string_filter(
-            'enrolstatus', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->enrolstatus]
+            'enrolstatus',
+            \core_table\local\filter\filter::JOINTYPE_DEFAULT,
+            [$this->enrolstatus]
         ));
         $table->set_filterset($filterset);
 

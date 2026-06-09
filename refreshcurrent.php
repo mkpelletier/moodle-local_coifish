@@ -92,7 +92,12 @@ foreach ($courses as $course) {
     }
 
     $ok = \local_coifish\task\build_active_snapshots::refresh_one(
-        $course, $userid, null, null, $now, $existing
+        $course,
+        $userid,
+        null,
+        null,
+        $now,
+        $existing
     );
     if ($ok) {
         $refreshed++;

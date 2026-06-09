@@ -91,7 +91,7 @@ class lecturer_list extends table_sql implements dynamic_table {
         $params = [];
 
         if ($mode === 'cohort') {
-            // null = "no restriction" (e.g. admin); empty array = "explicit zero matches".
+            // Null = "no restriction" (e.g. admin); empty array = "explicit zero matches".
             $lecturerids = \local_coifish\filter_helper::get_filtered_lecturer_ids($cohortid);
             if ($lecturerids !== null) {
                 if (empty($lecturerids)) {

@@ -330,6 +330,17 @@ class filter_helper {
         return $prefix . '%';
     }
 
+    /**
+     * Get the user IDs (students or teachers) enrolled in courses whose
+     * shortname matches a programme regex pattern.
+     *
+     * Used by cohort-mode reporting to scope lecturers / students to a
+     * coordinator's programme.
+     *
+     * @param string $pattern Regex pattern to match against course shortnames.
+     * @param string $role 'teacher' for lecturers, 'student' for students.
+     * @return array User IDs (deduplicated, indexed).
+     */
     public static function get_users_by_course_pattern(string $pattern, string $role = 'student'): array {
         global $DB;
 

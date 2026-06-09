@@ -112,7 +112,7 @@ class risk_overview extends table_sql implements dynamic_table {
 
         $mode = \local_coifish\filter_helper::get_mode();
         if ($mode === 'cohort') {
-            // filter_helper::get_filtered_student_ids() returns null when the
+            // Filter_helper::get_filtered_student_ids() returns null when the
             // caller (e.g. an admin with no specific cohort selected) should
             // see everyone — distinct from an explicit empty list of zero
             // matching students.

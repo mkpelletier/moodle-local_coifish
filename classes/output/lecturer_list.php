@@ -60,10 +60,14 @@ class lecturer_list implements renderable, templatable {
         $table = new \local_coifish\table\lecturer_list('coifish-lecturer-list');
         $filterset = new \local_coifish\table\lecturer_list_filterset();
         $filterset->add_filter(new \core_table\local\filter\integer_filter(
-            'categoryid', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->filterid]
+            'categoryid',
+            \core_table\local\filter\filter::JOINTYPE_DEFAULT,
+            [$this->filterid]
         ));
         $filterset->add_filter(new \core_table\local\filter\integer_filter(
-            'cohortid', \core_table\local\filter\filter::JOINTYPE_DEFAULT, [$this->filterid]
+            'cohortid',
+            \core_table\local\filter\filter::JOINTYPE_DEFAULT,
+            [$this->filterid]
         ));
         $table->set_filterset($filterset);
 

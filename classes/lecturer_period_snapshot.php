@@ -72,7 +72,10 @@ class lecturer_period_snapshot {
 
         // Activity hours within the period (logstore + UG annotations, time-bounded).
         $hours = \local_coifish\lecturer_api::estimate_activity_hours(
-            $userid, $courseids, $periodstart, $periodend
+            $userid,
+            $courseids,
+            $periodstart,
+            $periodend
         );
 
         // Grading turnaround within the period (assign_grades.timemodified bounded).
@@ -116,8 +119,11 @@ class lecturer_period_snapshot {
                   WHERE teacherid = :uid AND timecreated BETWEEN :pfrom AND :pto",
                 ['uid' => $userid, 'pfrom' => $periodstart, 'pto' => $periodend]
             );
-            if ($totalintv > 0 && $dbman->table_exists('gradereport_coifish_intv_stu')
-                    && $dbman->table_exists('gradereport_coifish_intv_out')) {
+            if (
+                $totalintv > 0
+                && $dbman->table_exists('gradereport_coifish_intv_stu')
+                && $dbman->table_exists('gradereport_coifish_intv_out')
+            ) {
                 $intvimproved = (int)$DB->count_records_sql(
                     "SELECT COUNT(DISTINCT i.id)
                        FROM {gradereport_coifish_intv} i
@@ -148,7 +154,9 @@ class lecturer_period_snapshot {
         );
         $gradevalues = array_filter(
             array_column(array_values($studentgrades), 'avggrade'),
-            function ($v) { return $v !== null; }
+            function ($v) {
+                return $v !== null;
+            }
         );
         $avgstudentgrade = !empty($gradevalues)
             ? round(array_sum($gradevalues) / count($gradevalues), 2)
@@ -213,12 +221,12 @@ class lecturer_period_snapshot {
     /**
      * Compute the ISO week (Mon 00:00 to Sun 23:59:59) that contains a timestamp.
      *
-     * @param int $ts
-     * @return array [int $start, int $end]
+     * @param int $ts Unix timestamp.
+     * @return array Two-element array: start timestamp, end timestamp.
      */
     public static function week_bounds(int $ts): array {
-        // Find Monday of the ISO week.
-        $dow = (int)gmdate('w', $ts); // 0 = Sun, 1 = Mon, ...
+        // Find Monday of the ISO week. The dow value is Sunday-indexed: 0 = Sun, 1 = Mon, etc.
+        $dow = (int)gmdate('w', $ts);
         $offset = ($dow === 0 ? 6 : $dow - 1); // days since Monday.
         $monday = strtotime(gmdate('Y-m-d', $ts - $offset * 86400) . ' 00:00:00 UTC');
         $sunday = $monday + 7 * 86400 - 1;
