@@ -5,6 +5,9 @@
 ### Changed
 - **Longitudinal feedback-review metric now counts Unified Grader feedback views** alongside the native `mod_assign` events, via the shared `\gradereport_coifish\report::get_feedback_view_event_sql()` helper. Snapshots taken against courses that use UG for assignments / quizzes / forums / BBB no longer under-report student engagement with feedback.
 
+### Fixed
+- **Peer-review blockers**: added GPL v3 `LICENSE` file in the plugin root (was missing), and frankenstyle-prefixed the only global helper `generate_export_data()` → `local_coifish_generate_export_data()` in `export.php` to remove the namespace-collision risk flagged by the Moodle plugins-DB reviewer.
+
 ## [1.3.3] - 2026-05-19
 
 ### Fixed

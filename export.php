@@ -59,7 +59,7 @@ if ($download && !empty($datefrom) && !empty($dateto)) {
     }
 
     // Build the data.
-    $rows = generate_export_data($lecturerids, $timefrom, $timeto);
+    $rows = local_coifish_generate_export_data($lecturerids, $timefrom, $timeto);
 
     // Output CSV.
     $filename = 'lecturer_time_report_' . $datefrom . '_to_' . $dateto;
@@ -176,7 +176,7 @@ echo $OUTPUT->footer();
  * @param int $timeto End timestamp.
  * @return array Array of row data.
  */
-function generate_export_data(?array $lecturerids, int $timefrom, int $timeto): array {
+function local_coifish_generate_export_data(?array $lecturerids, int $timefrom, int $timeto): array {
     global $DB;
 
     // Get lecturer profiles.
