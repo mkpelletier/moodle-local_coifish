@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.2] - 2026-06-12
+
+### Fixed
+- **The `course_category` setting now applies to lecturer profiles.** Previously the category limit was honoured only on the student/risk-overview side, so the lecturer profile (cached and filtered), the profile course dropdown, the weekly trend snapshots, and the per-course time report counted courses in every category (including dev/test courses outside the configured tree). Every lecturer-side course-selection query now applies `filter_helper::get_category_scope_sql()`, consistent with the risk overview. The time report additionally gained the `lecturer_excluded_courses` filter it was missing.
+- **Student-outcome averaging no longer silently drops course rows.** `build_lecturer_profiles()` grouped the per-course outcome query by `(courseid, courseenddate)` while keying the result on `courseid`, so a course with more than one end-date value lost rows (and skewed the average). Now grouped by `courseid` alone with `MAX(courseenddate)` for trend ordering.
+- **Filtered lecturer profiles no longer emit a `fullname()` debugging notice.** `compute_lecturer_profile_for_range()` now fetches the full set of user name fields, matching the other two profile paths.
+
+## [1.4.1] - 2026-06-12
+
+### Changed
+- **Grading turnaround now clocks from the first grade**, not the last edit. All three turnaround sites (`lecturer_api::compute_lecturer_profile_for_range()`, `lecturer_api::build_lecturer_profiles()`, and `lecturer_period_snapshot::upsert()`) now measure submission → `assign_grades.timecreated` instead of `assign_grades.timemodified`, so a grade correction made months later no longer retroactively inflates a lecturer's turnaround. The weekly snapshot's period bound is likewise on first-grade time. The shared expression matches the `gradereport_coifish` plugin for consistency.
+- **Integrity referrals pause the turnaround clock.** Where the optional `local_unifiedgrader_referral` table is present (Unified Grader installed), an item escalated for an academic-integrity review stops the lecturer's clock at the moment of referral (1-stamp model: submission → escalation), so delays outside the lecturer's control are not counted against them. Every query that touches the table is guarded by `table_exists()` and degrades gracefully to the first-grade base when it is absent.
+
+### Added
+- **Per-assignment turnaround drill-down** via `lecturer_api::get_turnaround_breakdown()` and a collapsible "Turnaround by assignment" card on the lecturer profile. Each row shows the raw (first-grade) vs adjusted (referral-paused) average days, the number graded, and a badge counting items held for integrity review. Assignments averaging more than 7 days are highlighted. Read-only.
+
 ## [1.4.0] - 2026-06-09
 
 ### Added

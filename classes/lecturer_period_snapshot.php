@@ -51,8 +51,11 @@ class lecturer_period_snapshot {
 
         $dbman = $DB->get_manager();
 
-        // Courses this lecturer holds a teaching role in.
+        // Courses this lecturer holds a teaching role in, limited to the
+        // configured category scope and minus admin exclusions.
         [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql('tr');
+        [$exclfrag, $exclparams] = \local_coifish\filter_helper::get_excluded_courses_sql('c', 'lpx');
+        [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c', 'spcat');
         $courses = $DB->get_records_sql(
             "SELECT DISTINCT c.id, c.startdate, c.enddate
                FROM {role_assignments} ra
@@ -60,8 +63,15 @@ class lecturer_period_snapshot {
                JOIN {course} c ON c.id = ctx.instanceid
               WHERE ra.userid = :uid
                 AND ra.roleid $trinsql
-                AND c.id != :siteid",
-            array_merge(['ctxlevel' => CONTEXT_COURSE, 'uid' => $userid, 'siteid' => SITEID], $trparams)
+                AND c.id != :siteid
+                $exclfrag
+                $catfrag",
+            array_merge(
+                ['ctxlevel' => CONTEXT_COURSE, 'uid' => $userid, 'siteid' => SITEID],
+                $trparams,
+                $exclparams,
+                $catparams
+            )
         );
 
         if (empty($courses)) {
@@ -78,24 +88,18 @@ class lecturer_period_snapshot {
             $periodend
         );
 
-        // Grading turnaround within the period (assign_grades.timemodified bounded).
-        $turnaround = $DB->get_field_sql(
-            "SELECT AVG(ag.timemodified - asub.timemodified)
-               FROM {assign_grades} ag
-               JOIN {assign_submission} asub
-                    ON asub.assignment = ag.assignment AND asub.userid = ag.userid
-                    AND asub.status = 'submitted'
-               JOIN {assign} a ON a.id = ag.assignment
-              WHERE ag.grader = :uid
-                AND a.course $insqlc
-                AND ag.grade >= 0
-                AND ag.timemodified > asub.timemodified
-                AND ag.timemodified BETWEEN :pfrom AND :pto",
-            array_merge(
-                ['uid' => $userid, 'pfrom' => $periodstart, 'pto' => $periodend],
-                $inparamsc
-            )
+        // Grading turnaround within the period. Clock is based on first-grade
+        // (ag.timecreated), paused at an integrity referral where one applies;
+        // the period bound is on first-grade time too. Uses the canonical
+        // turnaround expression shared with lecturer_api for consistency.
+        [$tsql, $tparams] = \local_coifish\lecturer_api::turnaround_period_avg_sql(
+            $userid,
+            $insqlc,
+            $inparamsc,
+            $periodstart,
+            $periodend
         );
+        $turnaround = $DB->get_field_sql($tsql, $tparams);
         $avgturnarounddays = $turnaround > 0 ? round($turnaround / 86400, 1) : null;
 
         // Forum posts within the period (forum_posts.created bounded).
@@ -116,8 +120,9 @@ class lecturer_period_snapshot {
         if ($dbman->table_exists('gradereport_coifish_intv')) {
             $totalintv = (int)$DB->count_records_sql(
                 "SELECT COUNT(*) FROM {gradereport_coifish_intv}
-                  WHERE teacherid = :uid AND timecreated BETWEEN :pfrom AND :pto",
-                ['uid' => $userid, 'pfrom' => $periodstart, 'pto' => $periodend]
+                  WHERE teacherid = :uid AND courseid $insqlc
+                    AND timecreated BETWEEN :pfrom AND :pto",
+                array_merge(['uid' => $userid, 'pfrom' => $periodstart, 'pto' => $periodend], $inparamsc)
             );
             if (
                 $totalintv > 0
@@ -130,26 +135,40 @@ class lecturer_period_snapshot {
                        JOIN {gradereport_coifish_intv_stu} s ON s.interventionid = i.id
                        JOIN {gradereport_coifish_intv_out} o ON o.intvstudentid = s.id
                       WHERE i.teacherid = :uid AND o.outcome = 'improved'
+                        AND i.courseid $insqlc
                         AND i.timecreated BETWEEN :pfrom AND :pto",
-                    ['uid' => $userid, 'pfrom' => $periodstart, 'pto' => $periodend]
+                    array_merge(['uid' => $userid, 'pfrom' => $periodstart, 'pto' => $periodend], $inparamsc)
                 );
             }
         }
 
-        // Student grades from courses that ENDED within this period.
-        [$tr3insql, $tr3params] = \local_coifish\filter_helper::get_teacher_role_sql('tr3');
+        // Student grades from courses that ENDED within this period, scoped to the
+        // students allocated to this lecturer (shares a group, or the lecturer
+        // graded their work) rather than the whole course cohort.
         $studentgrades = $DB->get_records_sql(
             "SELECT cs.courseid, AVG(cs.finalgrade) AS avggrade
                FROM {local_coifish_course_snapshot} cs
-               JOIN {role_assignments} ra ON ra.userid = :uid
-               JOIN {context} ctx ON ctx.id = ra.contextid AND ctx.contextlevel = :ctxlevel
-                    AND ctx.instanceid = cs.courseid
-              WHERE ra.roleid $tr3insql
+              WHERE cs.courseid $insqlc
                 AND cs.courseenddate BETWEEN :pfrom AND :pto
+                AND (
+                    EXISTS (
+                        SELECT 1
+                          FROM {groups_members} sgm
+                          JOIN {groups} sg ON sg.id = sgm.groupid AND sg.courseid = cs.courseid
+                          JOIN {groups_members} lgm ON lgm.groupid = sgm.groupid AND lgm.userid = :guid
+                         WHERE sgm.userid = cs.userid
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                          FROM {assign_grades} ag
+                          JOIN {assign} a ON a.id = ag.assignment AND a.course = cs.courseid
+                         WHERE ag.grader = :gruid AND ag.userid = cs.userid AND ag.grade >= 0
+                    )
+                )
            GROUP BY cs.courseid",
             array_merge(
-                ['uid' => $userid, 'ctxlevel' => CONTEXT_COURSE, 'pfrom' => $periodstart, 'pto' => $periodend],
-                $tr3params
+                ['pfrom' => $periodstart, 'pto' => $periodend, 'guid' => $userid, 'gruid' => $userid],
+                $inparamsc
             )
         );
         $gradevalues = array_filter(

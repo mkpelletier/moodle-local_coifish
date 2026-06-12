@@ -92,6 +92,8 @@ class get_lecturer_time_report extends external_api {
 
         [$rinsql, $rinparams] = $DB->get_in_or_equal($lecturerids, SQL_PARAMS_NAMED, 'rl');
         [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql();
+        [$exclfrag, $exclparams] = \local_coifish\filter_helper::get_excluded_courses_sql('c', 'ltx');
+        [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c', 'ltcat');
         $assignments = $DB->get_records_sql(
             "SELECT DISTINCT ra.userid AS lectid, c.id AS courseid, c.fullname AS coursename, c.shortname
                FROM {role_assignments} ra
@@ -100,8 +102,16 @@ class get_lecturer_time_report extends external_api {
               WHERE ra.userid $rinsql
                 AND ra.roleid $trinsql
                 AND c.id != :siteid
+                $exclfrag
+                $catfrag
            ORDER BY ra.userid ASC, c.shortname ASC",
-            array_merge(['ctxlevel' => CONTEXT_COURSE, 'siteid' => SITEID], $rinparams, $trparams)
+            array_merge(
+                ['ctxlevel' => CONTEXT_COURSE, 'siteid' => SITEID],
+                $rinparams,
+                $trparams,
+                $exclparams,
+                $catparams
+            )
         );
         $coursesbylecturer = [];
         foreach ($assignments as $a) {

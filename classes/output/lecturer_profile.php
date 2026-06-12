@@ -212,6 +212,21 @@ class lecturer_profile implements renderable, templatable {
         $data->hastrends = !empty($data->trends);
         $data->trendweeks = count($snapshots);
 
+        // Per-assignment grading-turnaround drill-down (raw first-grade vs
+        // integrity-referral-adjusted). Scoped to the same non-excluded courses
+        // the profile metrics use, and to the active course/date filters.
+        $breakdowncourseids = array_keys($this->get_lecturer_courses($this->userid));
+        if ($this->courseid > 0) {
+            $breakdowncourseids = array_values(array_intersect($breakdowncourseids, [$this->courseid]));
+        }
+        $data->turnaroundbreakdown = \local_coifish\lecturer_api::get_turnaround_breakdown(
+            $this->userid,
+            $breakdowncourseids,
+            $timefrom,
+            $timeto
+        );
+        $data->hasturnaroundbreakdown = !empty($data->turnaroundbreakdown);
+
         return $data;
     }
 
@@ -309,6 +324,8 @@ class lecturer_profile implements renderable, templatable {
         global $DB;
 
         [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql();
+        [$exclfrag, $exclparams] = \local_coifish\filter_helper::get_excluded_courses_sql('c', 'lpx');
+        [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c', 'lpcat');
         $records = $DB->get_records_sql(
             "SELECT DISTINCT c.id, c.fullname, c.shortname
                FROM {role_assignments} ra
@@ -317,8 +334,15 @@ class lecturer_profile implements renderable, templatable {
               WHERE ra.userid = :uid
                 AND ra.roleid $trinsql
                 AND c.id != :siteid
+                $exclfrag
+                $catfrag
            ORDER BY c.fullname ASC",
-            array_merge(['ctxlevel' => CONTEXT_COURSE, 'uid' => $userid, 'siteid' => SITEID], $trparams)
+            array_merge(
+                ['ctxlevel' => CONTEXT_COURSE, 'uid' => $userid, 'siteid' => SITEID],
+                $trparams,
+                $exclparams,
+                $catparams
+            )
         );
 
         // If the viewer is a PC (not self-view, not admin), filter to their programme's courses.

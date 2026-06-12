@@ -424,6 +424,61 @@
     </div>
     {{/hastrends}}
 
+    {{! Per-assignment grading-turnaround drill-down (raw first-grade vs integrity-referral-adjusted). }}
+    {{#hasturnaroundbreakdown}}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">
+                <a class="text-decoration-none text-reset d-flex align-items-center" data-bs-toggle="collapse"
+                   href="#coifish-turnaround-breakdown" role="button" aria-expanded="false"
+                   aria-controls="coifish-turnaround-breakdown">
+                    <i class="fa fa-hourglass-half me-1" aria-hidden="true"></i>
+                    {{#str}}lecturer_turnaround_breakdown_title, local_coifish{{/str}}
+                    <i class="fa fa-chevron-down ms-auto" aria-hidden="true"></i>
+                </a>
+            </h5>
+        </div>
+        <div class="collapse" id="coifish-turnaround-breakdown">
+            <div class="card-body">
+                <p class="small text-muted">{{#str}}lecturer_turnaround_breakdown_desc, local_coifish{{/str}}</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th scope="col">{{#str}}col_course_name, local_coifish{{/str}}</th>
+                                <th scope="col">{{#str}}lecturer_turnaround_col_assignment, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_turnaround_col_graded, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_turnaround_col_raw, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_turnaround_col_adjusted, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-center">{{#str}}lecturer_turnaround_col_held, local_coifish{{/str}}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{#turnaroundbreakdown}}
+                            <tr>
+                                <td>{{coursename}}</td>
+                                <td>{{assignmentname}}</td>
+                                <td class="text-end">{{ngraded}}</td>
+                                <td class="text-end">{{rawavgdays}}d</td>
+                                <td class="text-end">
+                                    {{#isslow}}<span class="text-danger fw-semibold">{{adjavgdays}}d</span>{{/isslow}}
+                                    {{^isslow}}{{adjavgdays}}d{{/isslow}}
+                                </td>
+                                <td class="text-center">
+                                    {{#nheld}}<span class="badge bg-warning text-dark"
+                                        title="{{#str}}lecturer_turnaround_held_hint, local_coifish{{/str}}">{{nheld}}</span>{{/nheld}}
+                                    {{^nheld}}<span class="text-muted">-</span>{{/nheld}}
+                                </td>
+                            </tr>
+                            {{/turnaroundbreakdown}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    {{/hasturnaroundbreakdown}}
+
     {{! Activity time breakdown }}
     {{#hashours}}
     <div class="card mb-4">

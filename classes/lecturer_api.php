@@ -85,7 +85,13 @@ class lecturer_api {
     ): array {
         global $DB;
 
-        $user = $DB->get_record('user', ['id' => $userid], 'id, firstname, lastname, email');
+        // Include all name fields so fullname() doesn't trigger Moodle 5.x
+        // "missing name fields" debugging notices.
+        $namefields = \core_user\fields::for_name()->get_sql('', false, '', '', false)->selects;
+        $user = $DB->get_record_sql(
+            "SELECT id, email, $namefields FROM {user} WHERE id = :id",
+            ['id' => $userid]
+        );
         if (!$user) {
             return [];
         }
@@ -94,8 +100,11 @@ class lecturer_api {
         $hasfeedback = $dbman->table_exists('gradereport_coifish_feedback');
         $hasintv = $dbman->table_exists('gradereport_coifish_intv');
 
-        // Get courses this lecturer teaches.
+        // Get courses this lecturer teaches, limited to the configured category
+        // scope and minus admin-configured exclusions.
         [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql();
+        [$exclfrag, $exclparams] = \local_coifish\filter_helper::get_excluded_courses_sql('c', 'lpx');
+        [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c', 'lpcat');
         $courses = $DB->get_records_sql(
             "SELECT DISTINCT c.id, c.startdate, c.enddate
                FROM {role_assignments} ra
@@ -103,8 +112,15 @@ class lecturer_api {
                JOIN {course} c ON c.id = ctx.instanceid
               WHERE ra.userid = :uid
                 AND ra.roleid $trinsql
-                AND c.id != :siteid",
-            array_merge(['ctxlevel' => CONTEXT_COURSE, 'uid' => $userid, 'siteid' => SITEID], $trparams)
+                AND c.id != :siteid
+                $exclfrag
+                $catfrag",
+            array_merge(
+                ['ctxlevel' => CONTEXT_COURSE, 'uid' => $userid, 'siteid' => SITEID],
+                $trparams,
+                $exclparams,
+                $catparams
+            )
         );
 
         if (empty($courses)) {
@@ -135,34 +151,30 @@ class lecturer_api {
             $timeparams['tto'] = $timeto;
         }
 
-        // Feedback quality (from cache — not time-bounded as it's a snapshot).
+        // Feedback quality (from cache — not time-bounded as it's a snapshot;
+        // restricted to the lecturer's non-excluded, in-filter courses).
         $fb = null;
         if ($hasfeedback) {
             $fb = $DB->get_record_sql(
                 "SELECT AVG(composite) AS avgquality, AVG(coverage) AS avgcoverage,
                         AVG(depth) AS avgdepth, AVG(personalisation) AS avgpers
                    FROM {gradereport_coifish_feedback}
-                  WHERE userid = :uid",
-                ['uid' => $userid]
+                  WHERE userid = :uid AND courseid $insqlc",
+                array_merge(['uid' => $userid], $inparamsc)
             );
         }
 
-        // Grading turnaround within date range.
-        $turnaround = $DB->get_field_sql(
-            "SELECT AVG(ag.timemodified - asub.timemodified)
-               FROM {assign_grades} ag
-               JOIN {assign_submission} asub
-                    ON asub.assignment = ag.assignment AND asub.userid = ag.userid
-                    AND asub.status = 'submitted'
-               JOIN {assign} a ON a.id = ag.assignment
-              WHERE ag.grader = :uid
-                AND a.course $insqlc
-                AND ag.grade >= 0
-                AND ag.timemodified > asub.timemodified"
-                . ($timefrom > 0 ? ' AND ag.timemodified >= :tfrom' : '')
-                . ($timeto > 0 ? ' AND ag.timemodified <= :tto' : ''),
-            array_merge(['uid' => $userid], $inparamsc, $timeparams)
-        );
+        // Grading turnaround within date range. Clock is based on first-grade
+        // (ag.timecreated), paused at an integrity referral where one applies.
+        $tbound = '';
+        if ($timefrom > 0) {
+            $tbound .= ' AND ag.timecreated >= :tfrom';
+        }
+        if ($timeto > 0) {
+            $tbound .= ' AND ag.timecreated <= :tto';
+        }
+        [$tsql, $tparams] = self::turnaround_avg_sql($userid, $insqlc, $inparamsc, $tbound, $timeparams);
+        $turnaround = $DB->get_field_sql($tsql, $tparams);
         $avgturnarounddays = $turnaround > 0 ? round($turnaround / 86400, 1) : null;
 
         // Interventions within date range.
@@ -171,10 +183,10 @@ class lecturer_api {
         if ($hasintv) {
             $totalintv = (int)$DB->count_records_sql(
                 "SELECT COUNT(*) FROM {gradereport_coifish_intv}
-                  WHERE teacherid = :uid"
+                  WHERE teacherid = :uid AND courseid $insqlc"
                     . ($timefrom > 0 ? ' AND timecreated >= :tfrom' : '')
                     . ($timeto > 0 ? ' AND timecreated <= :tto' : ''),
-                array_merge(['uid' => $userid], $timeparams)
+                array_merge(['uid' => $userid], $inparamsc, $timeparams)
             );
             if ($totalintv > 0) {
                 $intvimproved = (int)$DB->count_records_sql(
@@ -182,10 +194,10 @@ class lecturer_api {
                        FROM {gradereport_coifish_intv} i
                        JOIN {gradereport_coifish_intv_stu} s ON s.interventionid = i.id
                        JOIN {gradereport_coifish_intv_out} o ON o.intvstudentid = s.id
-                      WHERE i.teacherid = :uid AND o.outcome = 'improved'"
+                      WHERE i.teacherid = :uid AND o.outcome = 'improved' AND i.courseid $insqlc"
                         . ($timefrom > 0 ? ' AND i.timecreated >= :tfrom' : '')
                         . ($timeto > 0 ? ' AND i.timecreated <= :tto' : ''),
-                    array_merge(['uid' => $userid], $timeparams)
+                    array_merge(['uid' => $userid], $inparamsc, $timeparams)
                 );
             }
         }
@@ -236,10 +248,10 @@ class lecturer_api {
         $record = (object)[
             'userid' => $userid,
             'coursecount' => $coursecount,
-            'avgfeedbackquality' => $fb ? round($fb->avgquality) : null,
-            'avgcoverage' => $fb ? round($fb->avgcoverage) : null,
-            'avgdepth' => $fb ? round($fb->avgdepth) : null,
-            'avgpersonalisation' => $fb ? round($fb->avgpers) : null,
+            'avgfeedbackquality' => ($fb && $fb->avgquality !== null) ? round($fb->avgquality) : null,
+            'avgcoverage' => ($fb && $fb->avgcoverage !== null) ? round($fb->avgcoverage) : null,
+            'avgdepth' => ($fb && $fb->avgdepth !== null) ? round($fb->avgdepth) : null,
+            'avgpersonalisation' => ($fb && $fb->avgpers !== null) ? round($fb->avgpers) : null,
             'avgturnarounddays' => $avgturnarounddays,
             'totalinterventions' => $totalintv,
             'interventionsimproved' => $intvimproved,
@@ -349,8 +361,11 @@ class lecturer_api {
         foreach ($lecturers as $lecturer) {
             $uid = $lecturer->userid;
 
-            // Get courses this lecturer teaches.
+            // Get courses this lecturer teaches, limited to the configured
+            // category scope and minus admin-configured exclusions.
             [$tr2insql, $tr2params] = \local_coifish\filter_helper::get_teacher_role_sql('tr2');
+            [$exclfrag, $exclparams] = \local_coifish\filter_helper::get_excluded_courses_sql('c', 'lpx');
+            [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c', 'bpcat');
             $courses = $DB->get_records_sql(
                 "SELECT DISTINCT c.id, c.startdate, c.enddate
                    FROM {role_assignments} ra
@@ -358,44 +373,46 @@ class lecturer_api {
                    JOIN {course} c ON c.id = ctx.instanceid
                   WHERE ra.userid = :uid
                     AND ra.roleid $tr2insql
-                    AND c.id != :siteid",
-                array_merge(['ctxlevel' => CONTEXT_COURSE, 'uid' => $uid, 'siteid' => SITEID], $tr2params)
+                    AND c.id != :siteid
+                    $exclfrag
+                    $catfrag",
+                array_merge(
+                    ['ctxlevel' => CONTEXT_COURSE, 'uid' => $uid, 'siteid' => SITEID],
+                    $tr2params,
+                    $exclparams,
+                    $catparams
+                )
             );
 
             if (empty($courses)) {
+                // Lecturer only holds a teaching role in excluded (or now-gone)
+                // courses — they should not carry a profile. Remove any stale one.
+                $DB->delete_records('local_coifish_lecturer', ['userid' => $uid]);
                 continue;
             }
 
             $coursecount = count($courses);
             $courseids = array_keys($courses);
+            // Reused across feedback / interventions / turnaround / outcomes so
+            // every stat is confined to this lecturer's non-excluded courses.
+            [$insqlc, $inparamsc] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED);
 
-            // Feedback quality from CoIFish cache.
+            // Feedback quality from CoIFish cache (restricted to non-excluded courses).
             $fb = null;
             if ($hasfeedback) {
                 $fb = $DB->get_record_sql(
                     "SELECT AVG(composite) AS avgquality, AVG(coverage) AS avgcoverage,
                             AVG(depth) AS avgdepth, AVG(personalisation) AS avgpers
                        FROM {gradereport_coifish_feedback}
-                      WHERE userid = :uid",
-                    ['uid' => $uid]
+                      WHERE userid = :uid AND courseid $insqlc",
+                    array_merge(['uid' => $uid], $inparamsc)
                 );
             }
 
-            // Grading turnaround across courses.
-            [$insqlc, $inparamsc] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED);
-            $turnaround = $DB->get_field_sql(
-                "SELECT AVG(ag.timemodified - asub.timemodified)
-                   FROM {assign_grades} ag
-                   JOIN {assign_submission} asub
-                        ON asub.assignment = ag.assignment AND asub.userid = ag.userid
-                        AND asub.status = 'submitted'
-                   JOIN {assign} a ON a.id = ag.assignment
-                  WHERE ag.grader = :uid
-                    AND a.course $insqlc
-                    AND ag.grade >= 0
-                    AND ag.timemodified > asub.timemodified",
-                array_merge(['uid' => $uid], $inparamsc)
-            );
+            // Grading turnaround across courses. Clock is based on first-grade
+            // (ag.timecreated), paused at an integrity referral where one applies.
+            [$tsql, $tparams] = self::turnaround_avg_sql($uid, $insqlc, $inparamsc, '', []);
+            $turnaround = $DB->get_field_sql($tsql, $tparams);
             $avgturnarounddays = $turnaround > 0 ? round($turnaround / 86400, 1) : null;
 
             // Interventions.
@@ -404,8 +421,8 @@ class lecturer_api {
             if ($hasintv) {
                 $totalintv = (int)$DB->count_records_sql(
                     "SELECT COUNT(*) FROM {gradereport_coifish_intv}
-                      WHERE teacherid = :uid",
-                    ['uid' => $uid]
+                      WHERE teacherid = :uid AND courseid $insqlc",
+                    array_merge(['uid' => $uid], $inparamsc)
                 );
                 if ($totalintv > 0) {
                     $intvimproved = (int)$DB->count_records_sql(
@@ -413,8 +430,8 @@ class lecturer_api {
                            FROM {gradereport_coifish_intv} i
                            JOIN {gradereport_coifish_intv_stu} s ON s.interventionid = i.id
                            JOIN {gradereport_coifish_intv_out} o ON o.intvstudentid = s.id
-                          WHERE i.teacherid = :uid AND o.outcome = 'improved'",
-                        ['uid' => $uid]
+                          WHERE i.teacherid = :uid AND o.outcome = 'improved' AND i.courseid $insqlc",
+                        array_merge(['uid' => $uid], $inparamsc)
                     );
                 }
             }
@@ -438,18 +455,33 @@ class lecturer_api {
             }
             $avgforumpostspw = $totalweeks > 0 ? round($totalposts / $totalweeks, 1) : null;
 
-            // Student outcome trends.
-            [$tr3insql, $tr3params] = \local_coifish\filter_helper::get_teacher_role_sql('tr3');
+            // Student outcome trends — scoped to the students actually allocated to
+            // this lecturer rather than the whole course: a student counts when they
+            // share a group with the lecturer, OR the lecturer graded their work
+            // (group membership with grader fallback). Without this, every teacher in
+            // a multi-tutor course would be credited with the whole cohort's outcomes.
             $studentgrades = $DB->get_records_sql(
-                "SELECT cs.courseid, AVG(cs.finalgrade) AS avggrade, cs.courseenddate
+                "SELECT cs.courseid, AVG(cs.finalgrade) AS avggrade, MAX(cs.courseenddate) AS courseenddate
                    FROM {local_coifish_course_snapshot} cs
-                   JOIN {role_assignments} ra ON ra.userid = :uid
-                   JOIN {context} ctx ON ctx.id = ra.contextid AND ctx.contextlevel = :ctxlevel
-                        AND ctx.instanceid = cs.courseid
-                  WHERE ra.roleid $tr3insql
-               GROUP BY cs.courseid, cs.courseenddate
-               ORDER BY cs.courseenddate ASC",
-                array_merge(['uid' => $uid, 'ctxlevel' => CONTEXT_COURSE], $tr3params)
+                  WHERE cs.courseid $insqlc
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                              FROM {groups_members} sgm
+                              JOIN {groups} sg ON sg.id = sgm.groupid AND sg.courseid = cs.courseid
+                              JOIN {groups_members} lgm ON lgm.groupid = sgm.groupid AND lgm.userid = :guid
+                             WHERE sgm.userid = cs.userid
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                              FROM {assign_grades} ag
+                              JOIN {assign} a ON a.id = ag.assignment AND a.course = cs.courseid
+                             WHERE ag.grader = :gruid AND ag.userid = cs.userid AND ag.grade >= 0
+                        )
+                    )
+               GROUP BY cs.courseid
+               ORDER BY MAX(cs.courseenddate) ASC",
+                array_merge($inparamsc, ['guid' => $uid, 'gruid' => $uid])
             );
             $gradevalues = array_filter(
                 array_column(array_values($studentgrades), 'avggrade'),
@@ -490,10 +522,10 @@ class lecturer_api {
             $record = [
                 'userid' => $uid,
                 'coursecount' => $coursecount,
-                'avgfeedbackquality' => $fb ? round($fb->avgquality) : null,
-                'avgcoverage' => $fb ? round($fb->avgcoverage) : null,
-                'avgdepth' => $fb ? round($fb->avgdepth) : null,
-                'avgpersonalisation' => $fb ? round($fb->avgpers) : null,
+                'avgfeedbackquality' => ($fb && $fb->avgquality !== null) ? round($fb->avgquality) : null,
+                'avgcoverage' => ($fb && $fb->avgcoverage !== null) ? round($fb->avgcoverage) : null,
+                'avgdepth' => ($fb && $fb->avgdepth !== null) ? round($fb->avgdepth) : null,
+                'avgpersonalisation' => ($fb && $fb->avgpers !== null) ? round($fb->avgpers) : null,
                 'avgturnarounddays' => $avgturnarounddays,
                 'totalinterventions' => $totalintv,
                 'interventionsimproved' => $intvimproved,
@@ -524,6 +556,236 @@ class lecturer_api {
             [$wstart, $wend] = \local_coifish\lecturer_period_snapshot::week_bounds($now);
             \local_coifish\lecturer_period_snapshot::upsert($uid, $wstart, $wend);
         }
+    }
+
+    /**
+     * SQL fragment for the integrity-referral LEFT JOIN, when the referral
+     * table exists. Pauses the turnaround clock at the moment a graded item
+     * was referred for academic-integrity review (1-stamp model).
+     *
+     * @return string LEFT JOIN clause (joins on ag.assignment / ag.userid), or
+     *                an empty string when the referral table is not installed.
+     */
+    protected static function turnaround_ref_join(): string {
+        global $DB;
+        if (!$DB->get_manager()->table_exists('local_unifiedgrader_referral')) {
+            return '';
+        }
+        return "
+            LEFT JOIN (
+                SELECT cm.instance AS assignid, r.userid AS userid, MIN(r.timereferred) AS timereferred
+                  FROM {local_unifiedgrader_referral} r
+                  JOIN {course_modules} cm ON cm.id = r.cmid
+                  JOIN {modules} mo ON mo.id = cm.module AND mo.name = 'assign'
+                 GROUP BY cm.instance, r.userid
+            ) ugref ON ugref.assignid = ag.assignment AND ugref.userid = ag.userid";
+    }
+
+    /**
+     * The effective clock-end SQL expression for one graded item.
+     *
+     * When a referral exists for the item and falls strictly after submission
+     * and at or before first grading, the clock stops at referral time;
+     * otherwise it stops at first-grade time (ag.timecreated). When the
+     * referral table is absent this reduces to ag.timecreated, still giving
+     * the first-grade fix.
+     *
+     * @return string SQL CASE / column expression.
+     */
+    protected static function turnaround_clockend(): string {
+        global $DB;
+        if (!$DB->get_manager()->table_exists('local_unifiedgrader_referral')) {
+            return 'ag.timecreated';
+        }
+        return "CASE
+                  WHEN ugref.timereferred IS NOT NULL
+                       AND ugref.timereferred > asub.timemodified
+                       AND ugref.timereferred <= ag.timecreated
+                  THEN ugref.timereferred
+                  ELSE ag.timecreated
+                END";
+    }
+
+    /**
+     * Build the canonical "average grading turnaround in seconds" query and its
+     * parameters, shared by every turnaround computation so all sites produce
+     * identical per-item semantics (first-grade base + referral pause-the-clock).
+     *
+     * @param int $userid Lecturer (grader) user ID.
+     * @param string $insqlc Course IN(...) fragment from get_in_or_equal().
+     * @param array $inparamsc Params for $insqlc.
+     * @param string $tbound Extra clock-end time-bound fragment (must reference
+     *                       ag.timecreated and use named params present in $tparams).
+     * @param array $tparams Params for $tbound.
+     * @return array [string $sql, array $params]
+     */
+    protected static function turnaround_avg_sql(
+        int $userid,
+        string $insqlc,
+        array $inparamsc,
+        string $tbound,
+        array $tparams
+    ): array {
+        $refjoin = self::turnaround_ref_join();
+        $clockend = self::turnaround_clockend();
+        $sql = "SELECT AVG(gap) FROM (
+                    SELECT (($clockend) - asub.timemodified) AS gap
+                      FROM {assign_grades} ag
+                      JOIN {assign_submission} asub
+                           ON asub.assignment = ag.assignment AND asub.userid = ag.userid
+                           AND asub.status = 'submitted'
+                      JOIN {assign} a ON a.id = ag.assignment
+                      $refjoin
+                     WHERE ag.grader = :uid
+                       AND a.course $insqlc
+                       AND ag.grade >= 0
+                       AND ($clockend) > asub.timemodified
+                       $tbound
+                ) t";
+        return [$sql, array_merge(['uid' => $userid], $inparamsc, $tparams)];
+    }
+
+    /**
+     * Canonical turnaround query bounded to a period on first-grade time.
+     *
+     * Public wrapper used by lecturer_period_snapshot so the weekly snapshot
+     * uses the same first-grade-base + referral-pause semantics as every other
+     * turnaround site. The period bound is on ag.timecreated (first grade).
+     *
+     * @param int $userid Lecturer (grader) user ID.
+     * @param string $insqlc Course IN(...) fragment from get_in_or_equal().
+     * @param array $inparamsc Params for $insqlc.
+     * @param int $periodstart Inclusive lower bound on ag.timecreated.
+     * @param int $periodend Inclusive upper bound on ag.timecreated.
+     * @return array [string $sql, array $params]
+     */
+    public static function turnaround_period_avg_sql(
+        int $userid,
+        string $insqlc,
+        array $inparamsc,
+        int $periodstart,
+        int $periodend
+    ): array {
+        return self::turnaround_avg_sql(
+            $userid,
+            $insqlc,
+            $inparamsc,
+            ' AND ag.timecreated BETWEEN :pfrom AND :pto',
+            ['pfrom' => $periodstart, 'pto' => $periodend]
+        );
+    }
+
+    /**
+     * Per-assignment grading-turnaround drill-down for one lecturer.
+     *
+     * One row per assignment the lecturer graded, comparing the raw
+     * (first-grade) average turnaround against the integrity-referral-adjusted
+     * average. Ordered slowest-adjusted first. Read-only.
+     *
+     * @param int $userid Lecturer (grader) user ID.
+     * @param array $courseids Course IDs to scope to (already exclusion-filtered).
+     * @param int $timefrom Lower bound on first-grade time (0 = none).
+     * @param int $timeto Upper bound on first-grade time (0 = none).
+     * @return array List of assoc rows: courseid, coursename, assignmentname,
+     *               cmid, ngraded, rawavgdays, adjavgdays, nheld, isslow.
+     */
+    public static function get_turnaround_breakdown(
+        int $userid,
+        array $courseids,
+        int $timefrom = 0,
+        int $timeto = 0
+    ): array {
+        global $DB;
+
+        if (empty($courseids)) {
+            return [];
+        }
+
+        [$insqlc, $inparamsc] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'tbc');
+
+        $tbound = '';
+        $tparams = [];
+        if ($timefrom > 0) {
+            $tbound .= ' AND ag.timecreated >= :tfrom';
+            $tparams['tfrom'] = $timefrom;
+        }
+        if ($timeto > 0) {
+            $tbound .= ' AND ag.timecreated <= :tto';
+            $tparams['tto'] = $timeto;
+        }
+
+        $hasref = $DB->get_manager()->table_exists('local_unifiedgrader_referral');
+        $refjoin = self::turnaround_ref_join();
+        $clockend = self::turnaround_clockend();
+        // Adjusted gap uses the referral-aware clock-end; raw gap always uses
+        // first-grade time so the UI can show the effect of the pause.
+        $heldexpr = $hasref
+            ? "CASE WHEN ugref.timereferred IS NOT NULL
+                         AND ugref.timereferred > asub.timemodified
+                         AND ugref.timereferred <= ag.timecreated
+                    THEN 1 ELSE 0 END"
+            : '0';
+
+        // Resolve the course-module id per assignment instance so the UI can
+        // deep-link. One assign instance maps to exactly one course_module.
+        $rows = $DB->get_records_sql(
+            "SELECT a.id AS assignid,
+                    a.course AS courseid,
+                    a.name AS assignmentname,
+                    cm.id AS cmid,
+                    COUNT(ag.id) AS ngraded,
+                    AVG(ag.timecreated - asub.timemodified) AS rawavgsecs,
+                    AVG(($clockend) - asub.timemodified) AS adjavgsecs,
+                    SUM($heldexpr) AS nheld
+               FROM {assign_grades} ag
+               JOIN {assign_submission} asub
+                    ON asub.assignment = ag.assignment AND asub.userid = ag.userid
+                    AND asub.status = 'submitted'
+               JOIN {assign} a ON a.id = ag.assignment
+               JOIN {course_modules} cm ON cm.instance = a.id
+               JOIN {modules} mo ON mo.id = cm.module AND mo.name = 'assign'
+               $refjoin
+              WHERE ag.grader = :uid
+                AND a.course $insqlc
+                AND ag.grade >= 0
+                AND ($clockend) > asub.timemodified
+                $tbound
+           GROUP BY a.id, a.course, a.name, cm.id
+           ORDER BY adjavgsecs DESC",
+            array_merge(['uid' => $userid], $inparamsc, $tparams)
+        );
+
+        if (empty($rows)) {
+            return [];
+        }
+
+        // Resolve course display names in one query.
+        $cids = array_unique(array_map(function ($r) {
+            return (int)$r->courseid;
+        }, $rows));
+        [$cinsql, $cinparams] = $DB->get_in_or_equal($cids, SQL_PARAMS_NAMED, 'cn');
+        $coursenames = $DB->get_records_sql_menu(
+            "SELECT id, fullname FROM {course} WHERE id $cinsql",
+            $cinparams
+        );
+
+        $out = [];
+        foreach ($rows as $r) {
+            $rawdays = round((float)$r->rawavgsecs / 86400, 1);
+            $adjdays = round((float)$r->adjavgsecs / 86400, 1);
+            $out[] = [
+                'courseid' => (int)$r->courseid,
+                'coursename' => format_string($coursenames[$r->courseid] ?? ''),
+                'assignmentname' => format_string($r->assignmentname),
+                'cmid' => (int)$r->cmid,
+                'ngraded' => (int)$r->ngraded,
+                'rawavgdays' => $rawdays,
+                'adjavgdays' => $adjdays,
+                'nheld' => (int)$r->nheld,
+                'isslow' => ($adjdays > 7),
+            ];
+        }
+        return $out;
     }
 
     /**

@@ -72,6 +72,51 @@ class filter_helper {
     }
 
     /**
+     * Course IDs the admin has excluded from lecturer profiles (administrative /
+     * non-teaching courses). Parsed from the line-separated
+     * local_coifish/lecturer_excluded_courses setting; non-numeric lines are
+     * ignored and duplicates collapsed.
+     *
+     * @return int[] Excluded course IDs (may be empty).
+     */
+    public static function get_excluded_courseids(): array {
+        $raw = (string)get_config('local_coifish', 'lecturer_excluded_courses');
+        if (trim($raw) === '') {
+            return [];
+        }
+        $ids = [];
+        foreach (preg_split('/[\s,]+/', $raw) as $token) {
+            $token = trim($token);
+            if ($token !== '' && ctype_digit($token)) {
+                $ids[(int)$token] = (int)$token;
+            }
+        }
+        return array_values($ids);
+    }
+
+    /**
+     * SQL fragment excluding the admin-configured non-teaching courses.
+     *
+     * Returns ['', []] when nothing is excluded, so callers can append it
+     * unconditionally to a WHERE clause that references the {course} table.
+     *
+     * @param string $coursealias SQL alias for the {course} table (default 'c').
+     * @param string $paramprefix Named-param prefix to avoid collisions (default 'excl').
+     * @return array [string sqlfragment, array params] e.g. [" AND c.id NOT IN (:excl0)", ['excl0' => 7]].
+     */
+    public static function get_excluded_courses_sql(string $coursealias = 'c', string $paramprefix = 'excl'): array {
+        global $DB;
+
+        $excluded = self::get_excluded_courseids();
+        if (empty($excluded)) {
+            return ['', []];
+        }
+        [$insql, $params] = $DB->get_in_or_equal($excluded, SQL_PARAMS_NAMED, $paramprefix, false);
+        $fragment = " AND {$coursealias}.id {$insql}";
+        return [$fragment, $params];
+    }
+
+    /**
      * Get role IDs that represent a teaching role.
      *
      * Reads from the admin setting where the user selects which roles

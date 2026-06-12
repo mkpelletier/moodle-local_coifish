@@ -76,6 +76,16 @@ if ($hassiteconfig) {
         $catoptions
     ));
 
+    // Courses to exclude entirely from lecturer profiles (administrative /
+    // non-teaching courses). One numeric course ID per line.
+    $settings->add(new admin_setting_configtextarea(
+        'local_coifish/lecturer_excluded_courses',
+        get_string('setting_lecturer_excluded_courses', 'local_coifish'),
+        get_string('setting_lecturer_excluded_courses_desc', 'local_coifish'),
+        '',
+        PARAM_RAW
+    ));
+
     // Programme cohort mapping with course shortname patterns.
     require_once($CFG->dirroot . '/local/coifish/classes/admin_setting_cohortpatterns.php');
     $settings->add(new local_coifish_admin_setting_cohortpatterns(
