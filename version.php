@@ -25,8 +25,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_coifish';
-$plugin->version   = 2026061201;
-$plugin->release   = '1.4.2';
+$plugin->version   = 2026061202;
+$plugin->release   = '1.4.3';
 $plugin->requires  = 2024110400; // Moodle 5.0+.
 $plugin->maturity  = MATURITY_BETA;
 $plugin->dependencies = [

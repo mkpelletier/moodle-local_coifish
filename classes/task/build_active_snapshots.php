@@ -37,6 +37,13 @@ use local_coifish\metrics_helper;
  */
 class build_active_snapshots extends scheduled_task {
     /**
+     * Base number of days a snapshot is trusted without a detected change before
+     * a refresh is forced anyway (so course-structure drift self-heals). A
+     * per-user jitter is added on top to spread forced refreshes across days.
+     */
+    private const STALE_TTL_DAYS = 7;
+
+    /**
      * Task name.
      *
      * @return string
@@ -67,9 +74,15 @@ class build_active_snapshots extends scheduled_task {
             array_merge(['siteid' => SITEID, 'now' => $now], $catparams)
         );
 
+        $refreshed = 0;
+        $skipped = 0;
         foreach ($courses as $course) {
-            $this->refresh_course($course, $now);
+            $counts = $this->refresh_course($course, $now);
+            $refreshed += $counts['refreshed'];
+            $skipped += $counts['skipped'];
         }
+        mtrace("local_coifish: active snapshots refreshed {$refreshed}, "
+            . "skipped {$skipped} unchanged within TTL.");
 
         // Delete snapshot rows whose course is no longer in scope (course
         // hidden, ended, deleted, or now outside the configured category).
@@ -89,12 +102,12 @@ class build_active_snapshots extends scheduled_task {
      * @param object $course Course record.
      * @param int $now Current timestamp.
      */
-    protected function refresh_course(object $course, int $now): void {
+    protected function refresh_course(object $course, int $now): array {
         global $DB;
 
         $context = \context_course::instance($course->id, IGNORE_MISSING);
         if (!$context) {
-            return;
+            return ['refreshed' => 0, 'skipped' => 0];
         }
 
         $students = get_enrolled_users($context, 'moodle/course:isincompletionreports', 0, 'u.id');
@@ -103,7 +116,7 @@ class build_active_snapshots extends scheduled_task {
         // Remove snapshot rows for users no longer actively enrolled in this course.
         if (empty($studentids)) {
             $DB->delete_records('local_coifish_active_snapshot', ['courseid' => $course->id]);
-            return;
+            return ['refreshed' => 0, 'skipped' => 0];
         }
         [$insql, $inparams] = $DB->get_in_or_equal($studentids, SQL_PARAMS_NAMED, 'su', false);
         $DB->delete_records_select(
@@ -121,19 +134,92 @@ class build_active_snapshots extends scheduled_task {
 
         $termlabel = metrics_helper::resolve_term_label($course);
 
-        // Pre-load any existing rows for this course in one query so refresh_one
-        // doesn't issue a get_record per student (N+1 on large courses).
+        // Per-course-invariant inputs, fetched once and passed into every
+        // refresh_one call rather than recomputed for each student.
+        $totalactivities = \gradereport_coifish\report::get_expected_activity_count((int)$course->id);
+        $discussions = metrics_helper::get_course_discussions((int)$course->id);
+
+        // Pre-load existing rows (with their compute time) in one query so we can
+        // both skip unchanged students and avoid a get_record per student.
         $existingbyuser = $DB->get_records(
             'local_coifish_active_snapshot',
             ['courseid' => (int)$course->id],
             '',
-            'userid, id'
+            'userid, id, timecomputed'
         );
 
+        // Per-course "last change" signals for the staleness skip: the latest
+        // logstore activity by each student (their own views/posts/feedback
+        // views) and the latest gradebook change for them (teacher grading or
+        // feedback). One aggregate query each, vs re-deriving per student.
+        $coursestart = (int)($course->startdate ?? 0);
+        $lastactivity = $DB->get_records_sql_menu(
+            "SELECT userid, MAX(timecreated) AS lastts
+               FROM {logstore_standard_log}
+              WHERE courseid = :cid AND timecreated >= :cstart
+           GROUP BY userid",
+            ['cid' => (int)$course->id, 'cstart' => $coursestart]
+        );
+        $lastgrade = $DB->get_records_sql_menu(
+            "SELECT gg.userid, MAX(gg.timemodified) AS lastts
+               FROM {grade_grades} gg
+               JOIN {grade_items} gi ON gi.id = gg.itemid AND gi.courseid = :cid
+           GROUP BY gg.userid",
+            ['cid' => (int)$course->id]
+        );
+
+        $refreshed = 0;
+        $skipped = 0;
         foreach ($studentids as $userid) {
             $existing = $existingbyuser[$userid] ?? null;
-            self::refresh_one($course, $userid, $courseitem, $termlabel, $now, $existing);
+            $lastchange = max((int)($lastactivity[$userid] ?? 0), (int)($lastgrade[$userid] ?? 0));
+            if (self::is_snapshot_fresh($existing, (int)$userid, $lastchange, $now)) {
+                $skipped++;
+                continue;
+            }
+            self::refresh_one(
+                $course,
+                $userid,
+                $courseitem,
+                $termlabel,
+                $now,
+                $existing,
+                $totalactivities,
+                $discussions
+            );
+            $refreshed++;
         }
+
+        return ['refreshed' => $refreshed, 'skipped' => $skipped];
+    }
+
+    /**
+     * Decide whether an existing active snapshot can be left untouched this run.
+     *
+     * Skips only when (a) a snapshot already exists, (b) nothing the snapshot
+     * depends on has changed since it was computed — no newer logstore activity
+     * by the student and no newer gradebook change for them — and (c) the
+     * snapshot is still within its time-to-live. The TTL forces a periodic
+     * rebuild so drift our signals can't see (e.g. an added activity shifting
+     * the engagement denominator) self-heals, and is jittered by user id so the
+     * forced rebuilds spread across days instead of spiking on one night.
+     *
+     * @param object|null $existing Pre-loaded snapshot row (needs `timecomputed`), or null.
+     * @param int $userid Student user id (seeds the TTL jitter).
+     * @param int $lastchange Latest change timestamp detected for this student.
+     * @param int $now Current timestamp.
+     * @return bool True to skip (still fresh), false to rebuild.
+     */
+    protected static function is_snapshot_fresh(?object $existing, int $userid, int $lastchange, int $now): bool {
+        if (!$existing) {
+            return false;
+        }
+        $computed = (int)$existing->timecomputed;
+        if ($computed < $lastchange) {
+            return false;
+        }
+        $ttl = (self::STALE_TTL_DAYS + ($userid % 7)) * DAYSECS;
+        return $computed >= ($now - $ttl);
     }
 
     /**
@@ -157,7 +243,9 @@ class build_active_snapshots extends scheduled_task {
         ?object $courseitem = null,
         ?string $termlabel = null,
         ?int $now = null,
-        ?object $existing = null
+        ?object $existing = null,
+        ?int $totalactivities = null,
+        ?array $discussions = null
     ): bool {
         global $DB;
 
@@ -179,7 +267,9 @@ class build_active_snapshots extends scheduled_task {
             $userid,
             $courseitem,
             0,
-            (int)($course->startdate ?? 0)
+            (int)($course->startdate ?? 0),
+            $totalactivities,
+            $discussions
         );
 
         if ($termlabel === null) {

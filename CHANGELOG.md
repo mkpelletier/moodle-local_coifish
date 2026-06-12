@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.3] - 2026-06-12
+
+### Changed
+- **Active-snapshot task is much lighter on the database.** `build_active_snapshots` now skips students whose snapshot is unchanged — it compares each student's last logstore activity and last gradebook change (two per-course aggregate queries) against the snapshot's compute time, and only recomputes the ones that actually moved. A jittered 7-day TTL forces a periodic rebuild so course-structure drift still self-heals, spread across days to avoid a synchronised spike. The run logs `refreshed N, skipped M` via mtrace.
+- **Per-course-invariant work hoisted out of the per-student loop.** The expected-activity count and the forum-discussion list (previously re-queried for every student inside `capture_student_metrics`) are now fetched once per course and passed in, removing two queries per student. `capture_student_metrics` gained optional `$totalactivities` / `$discussions` parameters (callers that omit them are unaffected), and the discussion query is exposed as `metrics_helper::get_course_discussions()`.
+
 ## [1.4.2] - 2026-06-12
 
 ### Fixed

@@ -64,7 +64,9 @@ class metrics_helper {
         int $userid,
         ?object $courseitem,
         int $endtime = 0,
-        int $starttime = 0
+        int $starttime = 0,
+        ?int $totalactivities = null,
+        ?array $discussions = null
     ): array {
         global $DB;
 
@@ -97,7 +99,10 @@ class metrics_helper {
         // Drop/keep-aware so optional assignments/quizzes don't inflate the denominator
         // and skew the longitudinal engagement signal downward for students who legitimately
         // skipped optional work.
-        $totalactivities = \gradereport_coifish\report::get_expected_activity_count($courseid);
+        // Per-course-invariant; the caller (e.g. the batch snapshot task) may
+        // pass it in to avoid recomputing it for every student in the course.
+        $totalactivities = $totalactivities
+            ?? \gradereport_coifish\report::get_expected_activity_count($courseid);
         $engaged = (int)$DB->count_records_sql(
             "SELECT COUNT(DISTINCT l.contextinstanceid)
                FROM {logstore_standard_log} l
@@ -107,16 +112,10 @@ class metrics_helper {
         );
         $engagement = $totalactivities > 0 ? min(100, round(($engaged / $totalactivities) * 100)) : null;
 
-        // Social presence: group-aware breadth + post-volume composite.
-        $alldiscussions = $DB->get_records_sql(
-            "SELECT fd.id, fd.groupid, cm.groupmode
-               FROM {forum_discussions} fd
-               JOIN {forum} f ON f.id = fd.forum
-               JOIN {course_modules} cm ON cm.instance = f.id AND cm.course = :cid
-               JOIN {modules} m ON m.id = cm.module AND m.name = 'forum'
-              WHERE fd.course = :cid2",
-            ['cid' => $courseid, 'cid2' => $courseid]
-        );
+        // Social presence: group-aware breadth + post-volume composite. The
+        // discussion list is per-course-invariant, so the caller may pass it in
+        // to avoid one forum query per student.
+        $alldiscussions = $discussions ?? self::get_course_discussions($courseid);
         $usergroups = groups_get_user_groups($courseid, $userid);
         $mygroupids = $usergroups[0] ?? [];
         $visiblediscussions = 0;
@@ -198,6 +197,28 @@ class metrics_helper {
             'selfregulation' => $selfregulation,
             'feedbackpct' => $feedbackpct,
         ];
+    }
+
+    /**
+     * Forum discussions in a course, with group context, for the social-presence
+     * metric. Per-course-invariant, so batch callers fetch it once and pass it
+     * into {@see capture_student_metrics()} rather than re-querying per student.
+     *
+     * @param int $courseid Course ID.
+     * @return array Discussion rows (id, groupid, groupmode).
+     */
+    public static function get_course_discussions(int $courseid): array {
+        global $DB;
+
+        return $DB->get_records_sql(
+            "SELECT fd.id, fd.groupid, cm.groupmode
+               FROM {forum_discussions} fd
+               JOIN {forum} f ON f.id = fd.forum
+               JOIN {course_modules} cm ON cm.instance = f.id AND cm.course = :cid
+               JOIN {modules} m ON m.id = cm.module AND m.name = 'forum'
+              WHERE fd.course = :cid2",
+            ['cid' => $courseid, 'cid2' => $courseid]
+        );
     }
 
     /**
