@@ -57,6 +57,8 @@ class metrics_helper {
      * @param object|null $courseitem The course grade item, or null if absent.
      * @param int $endtime Optional upper bound on timestamps (0 = no bound).
      * @param int $starttime Optional lower bound on timestamps (0 = no bound).
+     * @param int|null $totalactivities Pre-computed expected activity count for the course, or null to compute it here.
+     * @param array|null $discussions Pre-fetched course discussion list, or null to fetch it here.
      * @return array ['grade' => float|null, 'engagement', 'social', 'selfregulation', 'feedbackpct']
      */
     public static function capture_student_metrics(

@@ -235,6 +235,8 @@ class build_active_snapshots extends scheduled_task {
      * @param object|null $existing Pre-fetched existing row (must have `id` field) to avoid
      *                              an extra get_record. Pass null to look up here. Pass false-y
      *                              if no existing row is expected.
+     * @param int|null $totalactivities Pre-computed expected activity count for the course, or null to compute it.
+     * @param array|null $discussions Pre-fetched course discussion list, or null to fetch it.
      * @return bool True if a row was written, false if metrics could not be captured.
      */
     public static function refresh_one(

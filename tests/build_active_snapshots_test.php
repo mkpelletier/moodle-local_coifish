@@ -51,6 +51,17 @@ final class build_active_snapshots_test extends \advanced_testcase {
     }
 
     /**
+     * Skip a test that needs gradereport_coifish — the snapshot task depends on
+     * it for the engagement metric — when that sibling plugin isn't installed
+     * (e.g. local_coifish's own CI runs without it).
+     */
+    private function require_gradereport(): void {
+        if (!class_exists('\gradereport_coifish\report')) {
+            $this->markTestSkipped('gradereport_coifish is required to build active snapshots');
+        }
+    }
+
+    /**
      * The fresh/stale predicate: rebuild when there's no row, when a change
      * post-dates the snapshot, or when the TTL has lapsed; skip otherwise.
      */
@@ -81,11 +92,11 @@ final class build_active_snapshots_test extends \advanced_testcase {
     public function test_task_skips_fresh_snapshots(): void {
         global $DB;
         $this->resetAfterTest();
+        $this->require_gradereport();
         [$course, $student] = $this->make_course_with_student();
 
         $this->run_task();
-        $snap = $DB->get_record('local_coifish_active_snapshot',
-            ['courseid' => $course->id, 'userid' => $student->id]);
+        $snap = $DB->get_record('local_coifish_active_snapshot', ['courseid' => $course->id, 'userid' => $student->id]);
         $this->assertNotEmpty($snap);
 
         // Stamp it in the future: no activity can be newer, and it's within TTL,
@@ -104,11 +115,11 @@ final class build_active_snapshots_test extends \advanced_testcase {
     public function test_task_refreshes_stale_snapshots(): void {
         global $DB;
         $this->resetAfterTest();
+        $this->require_gradereport();
         [$course, $student] = $this->make_course_with_student();
 
         $this->run_task();
-        $snap = $DB->get_record('local_coifish_active_snapshot',
-            ['courseid' => $course->id, 'userid' => $student->id]);
+        $snap = $DB->get_record('local_coifish_active_snapshot', ['courseid' => $course->id, 'userid' => $student->id]);
         $this->assertNotEmpty($snap);
 
         // Age it past the maximum jittered TTL; the next run must rebuild it.
