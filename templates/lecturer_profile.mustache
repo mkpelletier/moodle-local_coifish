@@ -510,8 +510,8 @@
                                 <th scope="col" class="text-end">{{#str}}lecturer_feedback_col_graded, local_coifish{{/str}}</th>
                             </tr>
                         </thead>
+                        {{#feedbackbreakdown}}
                         <tbody>
-                            {{#feedbackbreakdown}}
                             <tr>
                                 <td>
                                     <a class="text-decoration-none d-flex align-items-center" data-bs-toggle="collapse"
@@ -527,18 +527,16 @@
                                 <td class="text-end fw-semibold">{{composite}}%</td>
                                 <td class="text-end">{{nwithfeedback}}/{{ngraded}}</td>
                             </tr>
-                            <tr class="collapse coifish-fb-course" id="coifish-fb-course-{{courseid}}"
-                                data-courseid="{{courseid}}">
-                                <td colspan="7" class="p-0">
-                                    <div class="coifish-fb-assignments bg-light">
-                                        <div class="text-muted small px-2 py-1">
-                                            {{#str}}lecturer_feedback_breakdown_loading, local_coifish{{/str}}
-                                        </div>
-                                    </div>
+                        </tbody>
+                        <tbody class="collapse coifish-fb-course" id="coifish-fb-course-{{courseid}}"
+                               data-courseid="{{courseid}}">
+                            <tr class="table-light">
+                                <td colspan="7" class="text-muted small ps-4 py-1">
+                                    {{#str}}lecturer_feedback_breakdown_loading, local_coifish{{/str}}
                                 </td>
                             </tr>
-                            {{/feedbackbreakdown}}
                         </tbody>
+                        {{/feedbackbreakdown}}
                     </table>
                 </div>
             </div>

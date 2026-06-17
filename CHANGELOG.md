@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.5.1] - 2026-06-17
+
+### Fixed
+- **Assignment drill-down rows now line up with the course-table columns.** The per-assignment breakdown was rendered as a separate nested `<table>` inside a full-width cell, so its columns auto-sized independently and drifted out of alignment with the course header row. The rows are now rendered as `<tr>`s in the *same* table (each course's detail is a collapsible `<tbody>`), so every column aligns with its heading. Assignment names are indented to keep the nested-under-course cue.
+
 ## [1.5.0] - 2026-06-17
 
 ### Added

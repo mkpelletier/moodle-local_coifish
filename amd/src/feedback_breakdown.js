@@ -51,13 +51,14 @@ const escape = (value) => {
  */
 const render = (target, rows, emptytext) => {
     if (!rows.length) {
-        target.innerHTML = '<div class="text-muted small px-2 py-1">' + escape(emptytext) + '</div>';
+        target.innerHTML = '<tr class="table-light"><td colspan="7" class="text-muted small ps-4 py-1">'
+            + escape(emptytext) + '</td></tr>';
         return;
     }
-    let html = '<table class="table table-sm mb-0"><tbody>';
+    let html = '';
     rows.forEach((row) => {
-        html += '<tr>'
-            + '<td>' + escape(row.name) + '</td>'
+        html += '<tr class="table-light">'
+            + '<td class="ps-4">' + escape(row.name) + '</td>'
             + '<td class="text-end">' + escape(row.coverage) + '%</td>'
             + '<td class="text-end">' + escape(row.depth) + '%</td>'
             + '<td class="text-end">' + escape(row.quality) + '%</td>'
@@ -66,7 +67,6 @@ const render = (target, rows, emptytext) => {
             + '<td class="text-end">' + escape(row.nwithfeedback) + '/' + escape(row.ngraded) + '</td>'
             + '</tr>';
     });
-    html += '</tbody></table>';
     target.innerHTML = html;
 };
 
@@ -79,8 +79,7 @@ export const init = (userid) => {
     document.querySelectorAll('.coifish-fb-course').forEach((collapse) => {
         collapse.addEventListener('show.bs.collapse', () => {
             const courseid = parseInt(collapse.getAttribute('data-courseid'), 10);
-            const target = collapse.querySelector('.coifish-fb-assignments');
-            if (!target || cache[courseid]) {
+            if (cache[courseid]) {
                 return;
             }
             cache[courseid] = true;
@@ -92,7 +91,7 @@ export const init = (userid) => {
                 request,
                 getString('lecturer_feedback_breakdown_none', 'local_coifish'),
             ]).then(([rows, emptytext]) => {
-                render(target, rows, emptytext);
+                render(collapse, rows, emptytext);
                 return rows;
             }).catch((error) => {
                 cache[courseid] = false;
