@@ -227,6 +227,16 @@ class lecturer_profile implements renderable, templatable {
         );
         $data->hasturnaroundbreakdown = !empty($data->turnaroundbreakdown);
 
+        // Per-course feedback-quality drill-down (which courses make up the
+        // composite feedback score). Scoped to the same in-scope course ids,
+        // honouring the course filter. Each course row expands on demand to its
+        // per-assignment breakdown, loaded lazily over the WS.
+        $data->feedbackbreakdown = \local_coifish\lecturer_api::get_feedback_breakdown(
+            $this->userid,
+            $breakdowncourseids
+        );
+        $data->hasfeedbackbreakdown = !empty($data->feedbackbreakdown);
+
         return $data;
     }
 

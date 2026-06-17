@@ -53,6 +53,13 @@ $functions = [
         'ajax' => false,
         'capabilities' => 'local/coifish:apiaccess',
     ],
+    'local_coifish_get_assignment_feedback' => [
+        'classname' => 'local_coifish\external\get_assignment_feedback',
+        'description' => 'Get a lecturer\'s per-assignment feedback breakdown for one course.',
+        'type' => 'read',
+        'ajax' => true,
+        'capabilities' => 'local/coifish:viewlecturerprofile',
+    ],
 ];
 
 $services = [

@@ -72,6 +72,7 @@ if ($userid > 0) {
     }
 
     $renderable = new \local_coifish\output\lecturer_profile($userid, $isself, $datefrom, $dateto, $courseid);
+    $PAGE->requires->js_call_amd('local_coifish/feedback_breakdown', 'init', [$userid]);
     echo $OUTPUT->header();
     echo $OUTPUT->render_from_template('local_coifish/lecturer_profile', $renderable->export_for_template($OUTPUT));
     echo $OUTPUT->footer();

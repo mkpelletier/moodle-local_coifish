@@ -159,7 +159,7 @@ class lecturer_api {
                 "SELECT AVG(composite) AS avgquality, AVG(coverage) AS avgcoverage,
                         AVG(depth) AS avgdepth, AVG(personalisation) AS avgpers
                    FROM {gradereport_coifish_feedback}
-                  WHERE userid = :uid AND courseid $insqlc",
+                  WHERE userid = :uid AND courseid $insqlc AND totalgraded > 0",
                 array_merge(['uid' => $userid], $inparamsc)
             );
         }
@@ -404,7 +404,7 @@ class lecturer_api {
                     "SELECT AVG(composite) AS avgquality, AVG(coverage) AS avgcoverage,
                             AVG(depth) AS avgdepth, AVG(personalisation) AS avgpers
                        FROM {gradereport_coifish_feedback}
-                      WHERE userid = :uid AND courseid $insqlc",
+                      WHERE userid = :uid AND courseid $insqlc AND totalgraded > 0",
                     array_merge(['uid' => $uid], $inparamsc)
                 );
             }
@@ -437,21 +437,22 @@ class lecturer_api {
             }
             $intveffectiveness = $totalintv > 0 ? round(($intvimproved / $totalintv) * 100) : null;
 
-            // Forum engagement.
+            // Forum engagement. One grouped query over all the lecturer's courses,
+            // then the per-course weeks maths in PHP — no query per course.
+            $postsbycourse = $DB->get_records_sql_menu(
+                "SELECT fd.course AS courseid, COUNT(fp.id) AS posts
+                   FROM {forum_posts} fp
+                   JOIN {forum_discussions} fd ON fd.id = fp.discussion
+                  WHERE fd.course $insqlc AND fp.userid = :uid
+               GROUP BY fd.course",
+                array_merge(['uid' => $uid], $inparamsc)
+            );
             $totalweeks = 0;
             $totalposts = 0;
             foreach ($courses as $course) {
                 $start = $course->startdate ?: ($now - 120 * 86400);
-                $weeks = max(1, ($now - $start) / (7 * 86400));
-                $posts = (int)$DB->count_records_sql(
-                    "SELECT COUNT(fp.id)
-                       FROM {forum_posts} fp
-                       JOIN {forum_discussions} fd ON fd.id = fp.discussion
-                      WHERE fd.course = :cid AND fp.userid = :uid",
-                    ['cid' => $course->id, 'uid' => $uid]
-                );
-                $totalweeks += $weeks;
-                $totalposts += $posts;
+                $totalweeks += max(1, ($now - $start) / (7 * 86400));
+                $totalposts += (int)($postsbycourse[$course->id] ?? 0);
             }
             $avgforumpostspw = $totalweeks > 0 ? round($totalposts / $totalweeks, 1) : null;
 
@@ -783,6 +784,54 @@ class lecturer_api {
                 'adjavgdays' => $adjdays,
                 'nheld' => (int)$r->nheld,
                 'isslow' => ($adjdays > 7),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Per-course feedback-quality drill-down for one lecturer.
+     *
+     * One row per course the lecturer has graded in, reading the pre-computed
+     * gradereport_coifish_feedback cache. Filtered to courses with totalgraded > 0
+     * so it stays consistent with the dilution-corrected composite average. Ordered
+     * worst composite first. Read-only. One query, no loops.
+     *
+     * @param int $userid Lecturer (teacher) user ID.
+     * @param array $courseids Course IDs to scope to (already exclusion-filtered).
+     * @return array List of assoc rows: courseid, coursename, coverage, depth,
+     *               quality, personalisation, composite, ngraded, nwithfeedback.
+     */
+    public static function get_feedback_breakdown(int $userid, array $courseids): array {
+        global $DB;
+
+        if (empty($courseids) || !$DB->get_manager()->table_exists('gradereport_coifish_feedback')) {
+            return [];
+        }
+
+        [$insqlc, $inparamsc] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'fbc');
+        $rows = $DB->get_records_sql(
+            "SELECT f.courseid, c.fullname AS coursename, f.coverage, f.depth, f.qualityscore,
+                    f.personalisation, f.composite, f.totalgraded, f.withfeedback
+               FROM {gradereport_coifish_feedback} f
+               JOIN {course} c ON c.id = f.courseid
+              WHERE f.userid = :uid AND f.courseid $insqlc AND f.totalgraded > 0
+           ORDER BY f.composite ASC",
+            array_merge(['uid' => $userid], $inparamsc)
+        );
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'courseid' => (int)$r->courseid,
+                'coursename' => format_string($r->coursename),
+                'coverage' => (int)$r->coverage,
+                'depth' => (int)$r->depth,
+                'quality' => (int)$r->qualityscore,
+                'personalisation' => (int)$r->personalisation,
+                'composite' => (int)$r->composite,
+                'ngraded' => (int)$r->totalgraded,
+                'nwithfeedback' => (int)$r->withfeedback,
             ];
         }
         return $out;

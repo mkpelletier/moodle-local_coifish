@@ -494,6 +494,62 @@ final class lecturer_api_test extends \advanced_testcase {
     }
 
     /**
+     * The feedback breakdown lists one row per course with graded work, worst
+     * composite first, and excludes courses with totalgraded = 0.
+     */
+    public function test_feedback_breakdown_excludes_ungraded_and_orders_worst_first(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        if (!$DB->get_manager()->table_exists('gradereport_coifish_feedback')) {
+            $this->markTestSkipped('gradereport_coifish_feedback table not present.');
+        }
+
+        $gen = $this->getDataGenerator();
+        $teacher = $gen->create_user();
+        $good = $gen->create_course();
+        $poor = $gen->create_course();
+        $empty = $gen->create_course();
+
+        // A high-composite course, a low-composite course, and one with no graded work.
+        $row = function (int $courseid, int $composite, int $totalgraded) use ($teacher) {
+            return (object)[
+                'courseid' => $courseid,
+                'userid' => $teacher->id,
+                'coverage' => 60,
+                'depth' => 55,
+                'personalisation' => 70,
+                'structured' => 50,
+                'composite' => $composite,
+                'totalgraded' => $totalgraded,
+                'withfeedback' => $totalgraded,
+                'avgwords' => 40,
+                'uniquepct' => 80,
+                'qualityscore' => $composite,
+                'timemodified' => time(),
+            ];
+        };
+        $DB->insert_record('gradereport_coifish_feedback', $row($good->id, 80, 5));
+        $DB->insert_record('gradereport_coifish_feedback', $row($poor->id, 30, 4));
+        $DB->insert_record('gradereport_coifish_feedback', $row($empty->id, 90, 0));
+
+        $rows = lecturer_api::get_feedback_breakdown(
+            $teacher->id,
+            [$good->id, $poor->id, $empty->id]
+        );
+
+        // The ungraded course is excluded; the remaining two are worst-first.
+        $this->assertCount(2, $rows);
+        $this->assertEquals($poor->id, $rows[0]['courseid']);
+        $this->assertEquals(30, $rows[0]['composite']);
+        $this->assertEquals($good->id, $rows[1]['courseid']);
+        $this->assertEquals(5, $rows[1]['ngraded']);
+
+        // Empty course list short-circuits.
+        $this->assertSame([], lecturer_api::get_feedback_breakdown($teacher->id, []));
+    }
+
+    /**
      * The course_category setting must limit lecturer profiles to courses within
      * that category tree; courses in other categories (e.g. dev/test) drop out.
      */

@@ -479,6 +479,73 @@
     </div>
     {{/hasturnaroundbreakdown}}
 
+    {{! Per-course feedback-quality drill-down. Each course row expands on demand
+        to its per-assignment breakdown, fetched lazily over the web service. }}
+    {{#hasfeedbackbreakdown}}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">
+                <a class="text-decoration-none text-reset d-flex align-items-center" data-bs-toggle="collapse"
+                   href="#coifish-feedback-breakdown" role="button" aria-expanded="false"
+                   aria-controls="coifish-feedback-breakdown">
+                    <i class="fa fa-comments-o me-1" aria-hidden="true"></i>
+                    {{#str}}lecturer_feedback_breakdown_title, local_coifish{{/str}}
+                    <i class="fa fa-chevron-down ms-auto" aria-hidden="true"></i>
+                </a>
+            </h5>
+        </div>
+        <div class="collapse" id="coifish-feedback-breakdown">
+            <div class="card-body">
+                <p class="small text-muted">{{#str}}lecturer_feedback_breakdown_desc, local_coifish{{/str}}</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th scope="col">{{#str}}col_course_name, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_dim_feedback_coverage, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_dim_feedback_depth, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_feedback_quality, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_dim_feedback_personalisation, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_feedback_col_composite, local_coifish{{/str}}</th>
+                                <th scope="col" class="text-end">{{#str}}lecturer_feedback_col_graded, local_coifish{{/str}}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{#feedbackbreakdown}}
+                            <tr>
+                                <td>
+                                    <a class="text-decoration-none d-flex align-items-center" data-bs-toggle="collapse"
+                                       href="#coifish-fb-course-{{courseid}}" role="button" aria-expanded="false"
+                                       aria-controls="coifish-fb-course-{{courseid}}">
+                                        <i class="fa fa-caret-right me-1" aria-hidden="true"></i>{{coursename}}
+                                    </a>
+                                </td>
+                                <td class="text-end">{{coverage}}%</td>
+                                <td class="text-end">{{depth}}%</td>
+                                <td class="text-end">{{quality}}%</td>
+                                <td class="text-end">{{personalisation}}%</td>
+                                <td class="text-end fw-semibold">{{composite}}%</td>
+                                <td class="text-end">{{nwithfeedback}}/{{ngraded}}</td>
+                            </tr>
+                            <tr class="collapse coifish-fb-course" id="coifish-fb-course-{{courseid}}"
+                                data-courseid="{{courseid}}">
+                                <td colspan="7" class="p-0">
+                                    <div class="coifish-fb-assignments bg-light">
+                                        <div class="text-muted small px-2 py-1">
+                                            {{#str}}lecturer_feedback_breakdown_loading, local_coifish{{/str}}
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {{/feedbackbreakdown}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    {{/hasfeedbackbreakdown}}
+
     {{! Activity time breakdown }}
     {{#hashours}}
     <div class="card mb-4">

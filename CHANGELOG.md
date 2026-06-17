@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.5.0] - 2026-06-17
+
+### Added
+- **Feedback-by-course drill-down** on the lecturer profile so a coordinator can see which courses make up a lecturer's composite feedback-quality score, rather than the number being opaque. A collapsible "Feedback by course" card lists each course (worst composite first) with its coverage/depth/quality/personalisation, composite, and with-feedback/graded counts, via `lecturer_api::get_feedback_breakdown()` — one query over the `gradereport_coifish_feedback` cache, scoped to the same in-scope courses (and course filter) as the rest of the profile, and consistent with the dilution fix (only courses with `totalgraded > 0`). Read-only.
+- **Lazy per-assignment expand.** Each course row expands on demand to its per-assignment feedback breakdown, fetched once over a new AJAX web service `local_coifish_get_assignment_feedback(userid, courseid)` and cached client-side per course (never eager-loaded). The web service guards `\gradereport_coifish\report::get_assignment_feedback_breakdown()` with `class_exists`/`method_exists` and returns `[]` when the optional grade report is absent. New AMD module `local_coifish/feedback_breakdown`.
+
+### Changed
+- **Feedback-quality scores are no longer diluted by ungraded courses.** A lecturer's `avgfeedbackquality` (and the coverage/depth/personalisation averages) now average only over courses where they actually graded something (`totalgraded > 0`), instead of being dragged toward zero by courses they hold a teaching role in but do not grade. Applied consistently across the cached profile, the filtered/range view, and the weekly trend snapshot.
+- **Removed an N+1 query from the daily profile build.** `build_lecturer_profiles` previously issued one forum-post count query per course inside the per-lecturer loop; it now uses a single grouped query per lecturer.
+
 ## [1.4.3] - 2026-06-12
 
 ### Changed

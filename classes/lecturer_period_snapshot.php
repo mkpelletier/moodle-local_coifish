@@ -190,7 +190,7 @@ class lecturer_period_snapshot {
                 "SELECT AVG(composite) AS avgquality, AVG(coverage) AS avgcoverage,
                         AVG(depth) AS avgdepth, AVG(personalisation) AS avgpers
                    FROM {gradereport_coifish_feedback}
-                  WHERE userid = :uid",
+                  WHERE userid = :uid AND totalgraded > 0",
                 ['uid' => $userid]
             );
             if ($fb) {
