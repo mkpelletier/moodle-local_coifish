@@ -127,7 +127,7 @@ final class toggle_feedback_exclusion_test extends \advanced_testcase {
         // A graded submission with a written comment gives the breakdown a row to return.
         $this->submit_and_grade($assign, $teacher, $student);
 
-        // get_assignment_feedback checks the capability at system context.
+        // The get_assignment_feedback web service checks the capability at system context.
         $syscontext = \context_system::instance();
         $roleid = $this->getDataGenerator()->create_role();
         assign_capability('local/coifish:viewlecturerprofile', CAP_ALLOW, $roleid, $syscontext->id);
