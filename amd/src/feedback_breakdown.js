@@ -76,28 +76,28 @@ const render = (target, rows, emptytext) => {
  */
 export const init = (userid) => {
     document.querySelectorAll('.coifish-fb-course').forEach((collapse) => {
-        collapse.addEventListener('show.bs.collapse', () => {
+        collapse.addEventListener('show.bs.collapse', async () => {
             const courseid = parseInt(collapse.getAttribute('data-courseid'), 10);
             const target = collapse.querySelector('.coifish-fb-assignments');
             if (!target || cache[courseid]) {
                 return;
             }
             cache[courseid] = true;
-            Ajax.call([{
-                methodname: 'local_coifish_get_assignment_feedback',
-                args: {userid: userid, courseid: courseid},
-            }])[0].then((rows) => {
-                return getString('lecturer_feedback_breakdown_none', 'local_coifish').then((emptytext) => {
-                    render(target, rows, emptytext);
-                    return rows;
-                });
-            }).catch(() => {
+            try {
+                const request = Ajax.call([{
+                    methodname: 'local_coifish_get_assignment_feedback',
+                    args: {userid: userid, courseid: courseid},
+                }])[0];
+                const [rows, emptytext] = await Promise.all([
+                    request,
+                    getString('lecturer_feedback_breakdown_none', 'local_coifish'),
+                ]);
+                render(target, rows, emptytext);
+            } catch {
                 cache[courseid] = false;
-                return getString('error').then((msg) => {
-                    target.innerHTML = '<div class="text-danger small px-2 py-1">' + escape(msg) + '</div>';
-                    return msg;
-                });
-            });
+                const msg = await getString('error');
+                target.innerHTML = '<div class="text-danger small px-2 py-1">' + escape(msg) + '</div>';
+            }
         });
     });
 };
