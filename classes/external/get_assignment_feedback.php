@@ -72,10 +72,20 @@ class get_assignment_feedback extends external_api {
             return [];
         }
 
-        return \gradereport_coifish\report::get_assignment_feedback_breakdown(
+        $rows = \gradereport_coifish\report::get_assignment_feedback_breakdown(
             $params['courseid'],
             $params['userid']
         );
+
+        // Drop assignments a coordinator has marked as not feedback-relevant.
+        $excluded = array_flip(\local_coifish\feedback_exclusions::get_excluded_cmids());
+        if (!empty($excluded)) {
+            $rows = array_values(array_filter($rows, function ($row) use ($excluded) {
+                return !isset($excluded[(int)$row['cmid']]);
+            }));
+        }
+
+        return $rows;
     }
 
     /**

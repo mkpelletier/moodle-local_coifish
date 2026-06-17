@@ -20,6 +20,9 @@
  * per-assignment breakdown once over the web service and cache the result so
  * re-expanding does not re-fetch. Never eager-loaded.
  *
+ * Coordinators additionally get a per-row action to mark an assignment as not
+ * feedback-relevant; doing so drops it from the analytics and removes its row.
+ *
  * @module     local_coifish/feedback_breakdown
  * @copyright  2026 South African Theological Seminary (ict@sats.ac.za)
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -29,6 +32,7 @@ import {getString} from 'core/str';
 import Notification from 'core/notification';
 
 const cache = {};
+const state = {canmanage: false};
 
 /**
  * Escape a string for safe insertion as text content of an HTML cell.
@@ -48,8 +52,10 @@ const escape = (value) => {
  * @param {HTMLElement} target The container to render into.
  * @param {Array} rows The assignment rows from the web service.
  * @param {string} emptytext Localised "no data" message.
+ * @param {string} excludelabel Localised action label for coordinators.
+ * @param {string} excludetitle Localised action title/aria text for coordinators.
  */
-const render = (target, rows, emptytext) => {
+const render = (target, rows, emptytext, excludelabel, excludetitle) => {
     if (!rows.length) {
         target.innerHTML = '<tr class="table-light"><td colspan="7" class="text-muted small ps-4 py-1">'
             + escape(emptytext) + '</td></tr>';
@@ -57,8 +63,16 @@ const render = (target, rows, emptytext) => {
     }
     let html = '';
     rows.forEach((row) => {
+        let action = '';
+        if (state.canmanage) {
+            action = ' <a href="#" class="coifish-fb-exclude small ms-2" '
+                + 'data-cmid="' + escape(row.cmid) + '" '
+                + 'title="' + escape(excludetitle) + '" '
+                + 'aria-label="' + escape(excludetitle) + '">'
+                + escape(excludelabel) + '</a>';
+        }
         html += '<tr class="table-light">'
-            + '<td class="ps-4">' + escape(row.name) + '</td>'
+            + '<td class="ps-4">' + escape(row.name) + action + '</td>'
             + '<td class="text-end">' + escape(row.coverage) + '%</td>'
             + '<td class="text-end">' + escape(row.depth) + '%</td>'
             + '<td class="text-end">' + escape(row.quality) + '%</td>'
@@ -71,12 +85,44 @@ const render = (target, rows, emptytext) => {
 };
 
 /**
+ * Handle a coordinator clicking the "not feedback-relevant" action on a row.
+ *
+ * @param {Event} e The click event.
+ */
+const onExcludeClick = (e) => {
+    const link = e.target.closest('.coifish-fb-exclude');
+    if (!link) {
+        return;
+    }
+    e.preventDefault();
+    const cmid = parseInt(link.getAttribute('data-cmid'), 10);
+    const row = link.closest('tr');
+    Ajax.call([{
+        methodname: 'local_coifish_toggle_feedback_exclusion',
+        args: {cmid: cmid, excluded: true},
+    }])[0].then((result) => {
+        if (row && result && result.excluded) {
+            row.parentNode.removeChild(row);
+        }
+        return result;
+    }).catch((error) => {
+        Notification.exception(error);
+        return error;
+    });
+};
+
+/**
  * Initialise the lazy drill-down for one lecturer.
  *
  * @param {number} userid The lecturer user ID.
+ * @param {boolean} canmanage Whether the viewer may toggle feedback relevance.
  */
-export const init = (userid) => {
+export const init = (userid, canmanage) => {
+    state.canmanage = canmanage === true;
     document.querySelectorAll('.coifish-fb-course').forEach((collapse) => {
+        if (state.canmanage) {
+            collapse.addEventListener('click', onExcludeClick);
+        }
         collapse.addEventListener('show.bs.collapse', () => {
             const courseid = parseInt(collapse.getAttribute('data-courseid'), 10);
             if (cache[courseid]) {
@@ -90,8 +136,10 @@ export const init = (userid) => {
             Promise.all([
                 request,
                 getString('lecturer_feedback_breakdown_none', 'local_coifish'),
-            ]).then(([rows, emptytext]) => {
-                render(collapse, rows, emptytext);
+                getString('lecturer_feedback_exclude_action', 'local_coifish'),
+                getString('lecturer_feedback_exclude_title', 'local_coifish'),
+            ]).then(([rows, emptytext, excludelabel, excludetitle]) => {
+                render(collapse, rows, emptytext, excludelabel, excludetitle);
                 return rows;
             }).catch((error) => {
                 cache[courseid] = false;

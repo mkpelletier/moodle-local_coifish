@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.6.0] - 2026-06-17
+
+### Added
+- **Coordinators can mark an assignment as "not feedback-relevant"** directly from the lecturer-profile "Feedback by course" drill-down — for complete/incomplete self-study activities that never receive written feedback and would otherwise drag feedback coverage down. Each assignment row gains an inline "Not feedback-relevant" action (coordinators only, gated on `local/coifish:viewlecturerprofile`); clicking it calls the new AJAX web service `local_coifish_toggle_feedback_exclusion(cmid, excluded)` and removes the row. The exclusion is global per assignment and backed by `local_coifish\feedback_exclusions` (config key `local_coifish/feedback_excluded_cmids`); `get_assignment_feedback` now filters excluded cmids out of the drill-down before returning, and the sibling `gradereport_coifish` change drops them from the feedback-coverage denominator.
+
 ## [1.5.1] - 2026-06-17
 
 ### Fixed

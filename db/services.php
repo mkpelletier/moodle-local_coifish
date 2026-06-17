@@ -60,6 +60,13 @@ $functions = [
         'ajax' => true,
         'capabilities' => 'local/coifish:viewlecturerprofile',
     ],
+    'local_coifish_toggle_feedback_exclusion' => [
+        'classname' => 'local_coifish\external\toggle_feedback_exclusion',
+        'description' => 'Mark an assignment as not feedback-relevant (or re-include it) for the feedback analytics.',
+        'type' => 'write',
+        'ajax' => true,
+        'capabilities' => 'local/coifish:viewlecturerprofile',
+    ],
 ];
 
 $services = [
