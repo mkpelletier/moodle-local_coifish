@@ -85,7 +85,7 @@ class feedback_exclusions {
             return false;
         }
         $grade = $DB->get_field('assign', 'grade', ['id' => $cm->instance]);
-        // assign.grade: > 0 points, 0 none, < 0 the negated scale id.
+        // The assign.grade field is > 0 for points, 0 for none, < 0 the negated scale id.
         return $grade !== false && (float)$grade < 0;
     }
 
