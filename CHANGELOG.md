@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.7.0] - 2026-06-18
+
+### Changed
+- **Complete/incomplete (self-study) assignments are now auto-excluded from feedback analytics by a grade-type heuristic, replacing the purely manual flag.** Scale-graded assignments (`assign.grade < 0`) typically never receive written feedback, so they are treated as not feedback-relevant by default instead of dragging coverage down. The programme coordinator stays in control: the drill-down now **shows** every assignment (excluded ones greyed with an *Auto-excluded* / *Excluded* badge) rather than hiding them, and each row carries an inline override — a **fa-ban** icon (tooltip "Exclude") to drop a feedback-relevant assignment, and a **fa-plus-square** icon (tooltip "Include") to count an auto-excluded one anyway. Overrides are stored minimally as two config keys (`feedback_excluded_cmids` = forced out, `feedback_included_cmids` = forced back in); a choice matching the heuristic stores nothing. `feedback_exclusions` now exposes `is_scale_graded()`, `get_included_cmids()`, and `apply_state()` (returning the effective state), and `is_excluded()` reflects heuristic-plus-override. The "How is this determined?" methodology card documents the heuristic.
+- **The drill-down web service annotates instead of filters.** `get_assignment_feedback` returns each row with `scalegraded`, `excluded`, and `excludedauto` flags (sourced from the sibling `gradereport_coifish` breakdown's new `scalegraded` field) so the coordinator can see and reverse what the heuristic decided; `toggle_feedback_exclusion` returns the effective `excluded`/`excludedauto` state. The AMD module re-renders the toggled row in place from its client-side cache.
+
 ## [1.6.0] - 2026-06-17
 
 ### Added

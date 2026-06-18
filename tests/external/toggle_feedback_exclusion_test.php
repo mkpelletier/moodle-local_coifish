@@ -102,9 +102,40 @@ final class toggle_feedback_exclusion_test extends \advanced_testcase {
     }
 
     /**
-     * The drill-down web service hides assignments that have been excluded.
+     * A complete/incomplete (scale-graded) assignment is excluded by the
+     * heuristic with no configuration, and can be forced back in.
      */
-    public function test_get_assignment_feedback_filters_excluded(): void {
+    public function test_scale_graded_assignment_auto_excluded(): void {
+        $this->resetAfterTest();
+        $gen = $this->getDataGenerator();
+
+        $course = $gen->create_course();
+        $scale = $gen->create_scale(['scale' => 'Incomplete,Complete']);
+        $assign = $gen->create_module('assign', ['course' => $course->id, 'grade' => -$scale->id]);
+        $cmid = (int)$assign->cmid;
+
+        // No override stored, yet the heuristic treats it as not feedback-relevant.
+        $this->assertTrue(feedback_exclusions::is_scale_graded($cmid));
+        $this->assertTrue(feedback_exclusions::is_excluded($cmid));
+        $this->assertNotContains($cmid, feedback_exclusions::get_excluded_cmids());
+
+        // Forcing it in records an include override, not an exclude entry.
+        feedback_exclusions::apply_state($cmid, false);
+        $this->assertFalse(feedback_exclusions::is_excluded($cmid));
+        $this->assertContains($cmid, feedback_exclusions::get_included_cmids());
+
+        // Returning it to the default clears the override entirely.
+        feedback_exclusions::apply_state($cmid, true);
+        $this->assertTrue(feedback_exclusions::is_excluded($cmid));
+        $this->assertNotContains($cmid, feedback_exclusions::get_included_cmids());
+        $this->assertNotContains($cmid, feedback_exclusions::get_excluded_cmids());
+    }
+
+    /**
+     * The drill-down web service marks excluded assignments rather than hiding
+     * them, so a coordinator can still see and re-include them.
+     */
+    public function test_get_assignment_feedback_marks_excluded(): void {
         if (
             !class_exists('\gradereport_coifish\report')
             || !method_exists('\gradereport_coifish\report', 'get_assignment_feedback_breakdown')
@@ -134,18 +165,38 @@ final class toggle_feedback_exclusion_test extends \advanced_testcase {
         role_assign($roleid, $teacher->id, $syscontext->id);
         $this->setUser($teacher);
 
-        // Baseline: the assignment appears in the drill-down.
+        // Baseline: the assignment appears and counts (a point-graded assignment
+        // is feedback-relevant by default).
         $before = get_assignment_feedback::execute($teacher->id, $course->id);
-        $cmids = array_map(static fn($r) => (int)$r['cmid'], $before);
-        if (!in_array($cmid, $cmids, true)) {
-            $this->markTestSkipped('Breakdown did not surface the seeded assignment; nothing to filter.');
+        $beforerow = $this->row_for($before, $cmid);
+        if ($beforerow === null) {
+            $this->markTestSkipped('Breakdown did not surface the seeded assignment; nothing to mark.');
         }
+        $this->assertFalse((bool)$beforerow['excluded']);
 
-        // Exclude it, then it must vanish from the drill-down.
-        feedback_exclusions::set_excluded($cmid, true);
+        // Exclude it: still present, now flagged as a manual (non-auto) exclusion.
+        feedback_exclusions::apply_state($cmid, true);
         $after = get_assignment_feedback::execute($teacher->id, $course->id);
-        $aftercmids = array_map(static fn($r) => (int)$r['cmid'], $after);
-        $this->assertNotContains($cmid, $aftercmids);
+        $afterrow = $this->row_for($after, $cmid);
+        $this->assertNotNull($afterrow);
+        $this->assertTrue((bool)$afterrow['excluded']);
+        $this->assertFalse((bool)$afterrow['excludedauto']);
+    }
+
+    /**
+     * Find the breakdown row for a given cmid.
+     *
+     * @param array $rows The web service rows.
+     * @param int $cmid The course-module id to find.
+     * @return array|null The matching row, or null.
+     */
+    private function row_for(array $rows, int $cmid): ?array {
+        foreach ($rows as $row) {
+            if ((int)$row['cmid'] === $cmid) {
+                return $row;
+            }
+        }
+        return null;
     }
 
     /**

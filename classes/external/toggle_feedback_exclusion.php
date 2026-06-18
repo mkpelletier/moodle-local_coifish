@@ -67,11 +67,15 @@ class toggle_feedback_exclusion extends external_api {
         self::validate_context($context);
         require_capability('local/coifish:viewlecturerprofile', $context);
 
-        feedback_exclusions::set_excluded($params['cmid'], $params['excluded']);
+        // Apply returns the effective state — including whether it now rests on
+        // the grade-type heuristic rather than a manual override — so the UI badge
+        // is accurate even when a request collapses back onto the default.
+        $state = feedback_exclusions::apply_state($params['cmid'], $params['excluded']);
 
         return [
             'cmid' => $params['cmid'],
-            'excluded' => $params['excluded'],
+            'excluded' => $state['excluded'],
+            'excludedauto' => $state['excludedauto'],
         ];
     }
 
@@ -83,7 +87,8 @@ class toggle_feedback_exclusion extends external_api {
     public static function execute_returns(): external_single_structure {
         return new external_single_structure([
             'cmid' => new external_value(PARAM_INT, 'Assignment course-module ID'),
-            'excluded' => new external_value(PARAM_BOOL, 'The new exclusion state'),
+            'excluded' => new external_value(PARAM_BOOL, 'The new effective exclusion state'),
+            'excludedauto' => new external_value(PARAM_BOOL, 'Whether the exclusion now rests on the grade-type heuristic'),
         ]);
     }
 }

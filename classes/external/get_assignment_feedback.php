@@ -77,12 +77,26 @@ class get_assignment_feedback extends external_api {
             $params['userid']
         );
 
-        // Drop assignments a coordinator has marked as not feedback-relevant.
+        // Annotate each row with its effective feedback-relevance so the
+        // coordinator sees — and can override — what the heuristic decided.
+        // Excluded assignments are shown, not hidden: scale-graded ones are
+        // auto-excluded (overridable to "include"), point-graded ones count
+        // unless the coordinator forced them out.
         $excluded = array_flip(\local_coifish\feedback_exclusions::get_excluded_cmids());
-        if (!empty($excluded)) {
-            $rows = array_values(array_filter($rows, function ($row) use ($excluded) {
-                return !isset($excluded[(int)$row['cmid']]);
-            }));
+        $included = array_flip(\local_coifish\feedback_exclusions::get_included_cmids());
+        foreach ($rows as $i => $row) {
+            $cmid = (int)$row['cmid'];
+            $auto = !empty($row['scalegraded']);
+            if (isset($included[$cmid])) {
+                $rows[$i]['excluded'] = false;
+                $rows[$i]['excludedauto'] = false;
+            } else if (isset($excluded[$cmid])) {
+                $rows[$i]['excluded'] = true;
+                $rows[$i]['excludedauto'] = false;
+            } else {
+                $rows[$i]['excluded'] = $auto;
+                $rows[$i]['excludedauto'] = $auto;
+            }
         }
 
         return $rows;
@@ -105,6 +119,9 @@ class get_assignment_feedback extends external_api {
                 'composite' => new external_value(PARAM_INT, 'Composite feedback score'),
                 'ngraded' => new external_value(PARAM_INT, 'Number of graded submissions'),
                 'nwithfeedback' => new external_value(PARAM_INT, 'Number of submissions with feedback'),
+                'scalegraded' => new external_value(PARAM_BOOL, 'Whether the assignment is complete/incomplete (scale) graded'),
+                'excluded' => new external_value(PARAM_BOOL, 'Whether the assignment is kept out of the feedback analytics'),
+                'excludedauto' => new external_value(PARAM_BOOL, 'Automatic (heuristic) exclusion rather than a manual override'),
             ])
         );
     }

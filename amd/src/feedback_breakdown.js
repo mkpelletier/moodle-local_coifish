@@ -20,19 +20,23 @@
  * per-assignment breakdown once over the web service and cache the result so
  * re-expanding does not re-fetch. Never eager-loaded.
  *
- * Coordinators additionally get a per-row action to mark an assignment as not
- * feedback-relevant; doing so drops it from the analytics and removes its row.
+ * Complete/incomplete (scale-graded) assignments are auto-excluded from the
+ * feedback metrics and shown greyed with a badge. Coordinators get a per-row
+ * action to exclude a feedback-relevant assignment (fa-ban) or include an
+ * excluded one (fa-plus-square); toggling updates the row in place.
  *
  * @module     local_coifish/feedback_breakdown
  * @copyright  2026 South African Theological Seminary (ict@sats.ac.za)
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 import Ajax from 'core/ajax';
-import {getString} from 'core/str';
+import {getStrings} from 'core/str';
 import Notification from 'core/notification';
 
-const cache = {};
-const state = {canmanage: false};
+// Per-course state: rows === null until fetched, then the row array (re-rendered
+// in place on toggle). A truthy `loading` guard prevents a double fetch.
+const courses = {};
+const state = {canmanage: false, strings: {}};
 
 /**
  * Escape a string for safe insertion as text content of an HTML cell.
@@ -47,32 +51,58 @@ const escape = (value) => {
 };
 
 /**
- * Render the assignment rows into the given target cell.
+ * Build the coordinator action icon for a row (exclude or include).
  *
- * @param {HTMLElement} target The container to render into.
- * @param {Array} rows The assignment rows from the web service.
- * @param {string} emptytext Localised "no data" message.
- * @param {string} excludelabel Localised action label for coordinators.
- * @param {string} excludetitle Localised action title/aria text for coordinators.
+ * @param {Object} row The assignment row.
+ * @return {string} The action HTML, or '' when the viewer cannot manage.
  */
-const render = (target, rows, emptytext, excludelabel, excludetitle) => {
+const actionFor = (row) => {
+    if (!state.canmanage) {
+        return '';
+    }
+    if (row.excluded) {
+        return ' <a href="#" class="coifish-fb-toggle ms-2" data-cmid="' + escape(row.cmid) + '" '
+            + 'data-exclude="0" title="' + escape(state.strings.include) + '" '
+            + 'aria-label="' + escape(state.strings.include) + '">'
+            + '<i class="fa fa-plus-square" aria-hidden="true"></i></a>';
+    }
+    return ' <a href="#" class="coifish-fb-toggle ms-2" data-cmid="' + escape(row.cmid) + '" '
+        + 'data-exclude="1" title="' + escape(state.strings.exclude) + '" '
+        + 'aria-label="' + escape(state.strings.exclude) + '">'
+        + '<i class="fa fa-ban" aria-hidden="true"></i></a>';
+};
+
+/**
+ * Build the "excluded" badge for a row, if any.
+ *
+ * @param {Object} row The assignment row.
+ * @return {string} The badge HTML, or '' when the row counts toward the metrics.
+ */
+const badgeFor = (row) => {
+    if (!row.excluded) {
+        return '';
+    }
+    const label = row.excludedauto ? state.strings.badgeauto : state.strings.badgeexcluded;
+    return ' <span class="badge bg-secondary ms-2">' + escape(label) + '</span>';
+};
+
+/**
+ * Render the assignment rows into the given course tbody.
+ *
+ * @param {HTMLElement} target The collapse tbody to render into.
+ * @param {Array} rows The assignment rows from the web service.
+ */
+const render = (target, rows) => {
     if (!rows.length) {
         target.innerHTML = '<tr class="table-light"><td colspan="7" class="text-muted small ps-4 py-1">'
-            + escape(emptytext) + '</td></tr>';
+            + escape(state.strings.none) + '</td></tr>';
         return;
     }
     let html = '';
     rows.forEach((row) => {
-        let action = '';
-        if (state.canmanage) {
-            action = ' <a href="#" class="coifish-fb-exclude small ms-2" '
-                + 'data-cmid="' + escape(row.cmid) + '" '
-                + 'title="' + escape(excludetitle) + '" '
-                + 'aria-label="' + escape(excludetitle) + '">'
-                + escape(excludelabel) + '</a>';
-        }
-        html += '<tr class="table-light">'
-            + '<td class="ps-4">' + escape(row.name) + action + '</td>'
+        const rowclass = row.excluded ? 'table-light text-muted' : 'table-light';
+        html += '<tr class="' + rowclass + '">'
+            + '<td class="ps-4">' + escape(row.name) + badgeFor(row) + actionFor(row) + '</td>'
             + '<td class="text-end">' + escape(row.coverage) + '%</td>'
             + '<td class="text-end">' + escape(row.depth) + '%</td>'
             + '<td class="text-end">' + escape(row.quality) + '%</td>'
@@ -85,27 +115,63 @@ const render = (target, rows, emptytext, excludelabel, excludetitle) => {
 };
 
 /**
- * Handle a coordinator clicking the "not feedback-relevant" action on a row.
+ * Handle a coordinator clicking the exclude/include action on a row.
  *
  * @param {Event} e The click event.
  */
-const onExcludeClick = (e) => {
-    const link = e.target.closest('.coifish-fb-exclude');
+const onToggleClick = (e) => {
+    const link = e.target.closest('.coifish-fb-toggle');
     if (!link) {
         return;
     }
     e.preventDefault();
     const cmid = parseInt(link.getAttribute('data-cmid'), 10);
-    const row = link.closest('tr');
+    const exclude = link.getAttribute('data-exclude') === '1';
+    const tbody = link.closest('tbody.coifish-fb-course');
+    const courseid = tbody ? parseInt(tbody.getAttribute('data-courseid'), 10) : null;
     Ajax.call([{
         methodname: 'local_coifish_toggle_feedback_exclusion',
-        args: {cmid: cmid, excluded: true},
+        args: {cmid: cmid, excluded: exclude},
     }])[0].then((result) => {
-        if (row && result && result.excluded) {
-            row.parentNode.removeChild(row);
+        const entry = courseid === null ? null : courses[courseid];
+        if (tbody && entry && Array.isArray(entry.rows)) {
+            entry.rows.forEach((row) => {
+                if (parseInt(row.cmid, 10) === cmid) {
+                    row.excluded = result.excluded;
+                    row.excludedauto = result.excludedauto;
+                }
+            });
+            render(tbody, entry.rows);
         }
         return result;
     }).catch((error) => {
+        Notification.exception(error);
+        return error;
+    });
+};
+
+/**
+ * Fetch and render one course's breakdown the first time it is expanded.
+ *
+ * @param {HTMLElement} collapse The course tbody being expanded.
+ * @param {number} userid The lecturer user ID.
+ */
+const loadCourse = (collapse, userid) => {
+    const courseid = parseInt(collapse.getAttribute('data-courseid'), 10);
+    const entry = courses[courseid];
+    if (entry && (entry.loading || entry.rows)) {
+        return;
+    }
+    courses[courseid] = {loading: true, rows: null};
+    Ajax.call([{
+        methodname: 'local_coifish_get_assignment_feedback',
+        args: {userid: userid, courseid: courseid},
+    }])[0].then((rows) => {
+        courses[courseid] = {loading: false, rows: rows};
+        render(collapse, rows);
+        return rows;
+    }).catch((error) => {
+        courses[courseid] = {loading: false, rows: null};
         Notification.exception(error);
         return error;
     });
@@ -119,33 +185,32 @@ const onExcludeClick = (e) => {
  */
 export const init = (userid, canmanage) => {
     state.canmanage = canmanage === true;
+    getStrings([
+        {key: 'lecturer_feedback_breakdown_none', component: 'local_coifish'},
+        {key: 'lecturer_feedback_exclude_title', component: 'local_coifish'},
+        {key: 'lecturer_feedback_include_title', component: 'local_coifish'},
+        {key: 'lecturer_feedback_badge_excluded', component: 'local_coifish'},
+        {key: 'lecturer_feedback_badge_autoexcluded', component: 'local_coifish'},
+    ]).then((strings) => {
+        state.strings = {
+            none: strings[0],
+            exclude: strings[1],
+            include: strings[2],
+            badgeexcluded: strings[3],
+            badgeauto: strings[4],
+        };
+        return strings;
+    }).catch((error) => {
+        Notification.exception(error);
+        return error;
+    });
+
     document.querySelectorAll('.coifish-fb-course').forEach((collapse) => {
         if (state.canmanage) {
-            collapse.addEventListener('click', onExcludeClick);
+            collapse.addEventListener('click', onToggleClick);
         }
         collapse.addEventListener('show.bs.collapse', () => {
-            const courseid = parseInt(collapse.getAttribute('data-courseid'), 10);
-            if (cache[courseid]) {
-                return;
-            }
-            cache[courseid] = true;
-            const request = Ajax.call([{
-                methodname: 'local_coifish_get_assignment_feedback',
-                args: {userid: userid, courseid: courseid},
-            }])[0];
-            Promise.all([
-                request,
-                getString('lecturer_feedback_breakdown_none', 'local_coifish'),
-                getString('lecturer_feedback_exclude_action', 'local_coifish'),
-                getString('lecturer_feedback_exclude_title', 'local_coifish'),
-            ]).then(([rows, emptytext, excludelabel, excludetitle]) => {
-                render(collapse, rows, emptytext, excludelabel, excludetitle);
-                return rows;
-            }).catch((error) => {
-                cache[courseid] = false;
-                Notification.exception(error);
-                return error;
-            });
+            loadCourse(collapse, userid);
         });
     });
 };
