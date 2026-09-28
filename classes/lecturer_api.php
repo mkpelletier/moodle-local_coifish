@@ -242,6 +242,9 @@ class lecturer_api {
                 ? min(100, round($avgstudentgrade))
                 : 50,
         ];
+        if ($hours['live'] !== null) {
+            $dimensions['live_teaching'] = $hours['live']['score'];
+        }
         $sf = self::compute_strengths_and_focus($dimensions);
 
         // Build a record-like object for format_profile.
@@ -263,6 +266,10 @@ class lecturer_api {
             'hours_communication' => $hours['communication'],
             'hours_livesessions' => $hours['livesessions'],
             'hours_total' => $hours['total'],
+            'livesessions' => $hours['live']['sessions'] ?? 0,
+            'livepeersessions' => $hours['live']['peersessions'] ?? 0,
+            'livereach' => $hours['live']['reach'] ?? null,
+            'livescore' => $hours['live']['score'] ?? null,
             'strengths' => json_encode($sf['strengths']),
             'focusareas' => json_encode($sf['focusareas']),
             'timemodified' => time(),
@@ -517,6 +524,9 @@ class lecturer_api {
                     ? min(100, round($avgstudentgrade))
                     : 50,
             ];
+            if ($hours['live'] !== null) {
+                $dimensions['live_teaching'] = $hours['live']['score'];
+            }
             $sf = self::compute_strengths_and_focus($dimensions);
 
             // Upsert.
@@ -538,6 +548,10 @@ class lecturer_api {
                 'hours_communication' => $hours['communication'],
                 'hours_livesessions' => $hours['livesessions'],
                 'hours_total' => $hours['total'],
+                'livesessions' => $hours['live']['sessions'] ?? 0,
+                'livepeersessions' => $hours['live']['peersessions'] ?? 0,
+                'livereach' => $hours['live']['reach'] ?? null,
+                'livescore' => $hours['live']['score'] ?? null,
                 'strengths' => json_encode($sf['strengths']),
                 'focusareas' => json_encode($sf['focusareas']),
                 'timemodified' => $now,
@@ -975,42 +989,12 @@ class lecturer_api {
             array_merge(['uid' => $uid], $inparams, $timeparams)
         );
 
-        // 3. Live session events (BigBlueButton).
-        // Try recording durations first, fall back to log-based session estimation.
-        $livesessionhours = 0.0;
-        if ($dbman->table_exists('bigbluebuttonbn_recordings')) {
-            $recordings = $DB->get_records_sql(
-                "SELECT r.id, r.importeddata
-                   FROM {bigbluebuttonbn_recordings} r
-                   JOIN {bigbluebuttonbn} b ON b.id = r.bigbluebuttonbnid
-                  WHERE b.course $insql AND r.status > 0",
-                $inparams
-            );
-            foreach ($recordings as $rec) {
-                if (!empty($rec->importeddata)) {
-                    $data = json_decode($rec->importeddata, true);
-                    // BBB stores duration in milliseconds or seconds depending on version.
-                    $duration = $data['duration'] ?? $data['playback']['duration'] ?? 0;
-                    if ($duration > 86400) {
-                        $duration /= 1000; // Convert from milliseconds.
-                    }
-                    $livesessionhours += $duration / 3600;
-                }
-            }
-        }
-        // Fall back to log-based estimation if no recordings found.
-        if ($livesessionhours == 0 && $dbman->table_exists('bigbluebuttonbn_logs')) {
-            $bbbevents = $DB->get_fieldset_sql(
-                "SELECT l.timecreated
-                   FROM {bigbluebuttonbn_logs} l
-                   JOIN {bigbluebuttonbn} b ON b.id = l.bigbluebuttonbnid
-                  WHERE l.userid = :uid AND b.course $insql
-               ORDER BY l.timecreated ASC",
-                array_merge(['uid' => $uid], $inparams)
-            );
-            $livesessionhours = self::compute_session_hours($bbbevents);
-        }
-        $livesessionhours = round($livesessionhours, 1);
+        // 3. Live sessions (BigBlueButton): the lecturer's own time in sittings
+        // they attended within the window, from BBB's per-attendee analytics.
+        // (Recording durations are not used: they credit one lecturer with every
+        // recorded session in the course, whoever ran it.)
+        $live = self::get_live_teaching($uid, $courseids, $timefrom, $timeto);
+        $livesessionhours = $live ? round($live['minutes'] / 60, 1) : 0.0;
 
         // Apply preparation multiplier to live session hours.
         $prepmultiplier = (int)(get_config('local_coifish', 'prep_multiplier') ?? 2);
@@ -1026,6 +1010,75 @@ class lecturer_api {
             'communication' => $commhours,
             'livesessions' => $livesessiontotal,
             'total' => $total,
+            'live' => $live,
+        ];
+    }
+
+    /**
+     * Live-teaching metrics for a lecturer across their courses within a window.
+     *
+     * Uses gradereport_coifish's live-session analyser: sittings the lecturer
+     * attended count in full, student-only sittings in rooms they are
+     * responsible for at the configured peer credit, and reach is the share of
+     * their students who joined at least one of those sittings. Only courses
+     * that held live sessions within the window count, so a lecturer is not
+     * scored on a course design without BigBlueButton.
+     *
+     * @param int $uid Lecturer user ID.
+     * @param int[] $courseids Courses the lecturer teaches.
+     * @param int $timefrom Window start.
+     * @param int $timeto Window end (0 = now).
+     * @return array|null ['sessions', 'peersessions', 'minutes', 'reach', 'score'], or null
+     *                    when none of the courses held live sessions in the window.
+     */
+    public static function get_live_teaching(int $uid, array $courseids, int $timefrom, int $timeto = 0): ?array {
+        global $DB;
+        if (!class_exists('\gradereport_coifish\live_sessions') || empty($courseids)) {
+            return null;
+        }
+        $timeto = $timeto ?: time();
+        $sessions = 0;
+        $peersessions = 0;
+        $credited = 0.0;
+        $minutes = 0;
+        $reachable = 0;
+        $reached = 0;
+        $spanfrom = null;
+        $spanto = null;
+        foreach ($courseids as $cid) {
+            $analyser = \gradereport_coifish\live_sessions::for_course((int)$cid);
+            if (!$analyser->has_sessions_between($timefrom, $timeto)) {
+                continue;
+            }
+            $t = $analyser->get_teacher($uid, $timefrom, $timeto);
+            $sessions += $t['facilitated'];
+            $peersessions += $t['peer'];
+            $credited += $t['credited'];
+            $minutes += $t['minutes'];
+            $reachable += $t['reachable'];
+            $reached += $t['reached'];
+
+            // Weeks the course actually ran within the window.
+            $course = $DB->get_record('course', ['id' => $cid], 'id, startdate, enddate');
+            $cfrom = max($timefrom, (int)$course->startdate);
+            $cto = (int)$course->enddate > 0 ? min($timeto, (int)$course->enddate) : $timeto;
+            $spanfrom = $spanfrom === null ? $cfrom : min($spanfrom, $cfrom);
+            $spanto = $spanto === null ? $cto : max($spanto, $cto);
+        }
+        if ($spanfrom === null) {
+            return null;
+        }
+        $weeks = max(1.0, ($spanto - $spanfrom) / WEEKSECS);
+        $reach = $reachable > 0 ? (int)round(100 * $reached / $reachable) : 0;
+        return [
+            'sessions' => $sessions,
+            'peersessions' => $peersessions,
+            'minutes' => $minutes,
+            'reach' => $reach,
+            'score' => \gradereport_coifish\live_sessions::score_teacher(
+                ['credited' => $credited, 'reach' => $reach],
+                $weeks
+            ),
         ];
     }
 
@@ -1127,6 +1180,11 @@ class lecturer_api {
             'hours_livesessions' => (float)$record->hours_livesessions,
             'hours_total' => (float)$record->hours_total,
             'hashours' => ((float)$record->hours_total > 0),
+            'livesessions' => (int)($record->livesessions ?? 0),
+            'livepeersessions' => (int)($record->livepeersessions ?? 0),
+            'livereach' => isset($record->livereach) ? (int)$record->livereach : null,
+            'livescore' => isset($record->livescore) ? (int)$record->livescore : null,
+            'haslive' => isset($record->livescore),
             'strengths' => $strengthlabels,
             'hasstrengths' => !empty($strengthlabels),
             'focusareas' => $focuslabels,

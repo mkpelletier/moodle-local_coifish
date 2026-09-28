@@ -171,6 +171,7 @@ class build_profiles extends scheduled_task {
                 'finalgrade' => $snapshot['grade'],
                 'engagement' => $snapshot['engagement'],
                 'social' => $snapshot['social'],
+                'socialversion' => $snapshot['socialversion'],
                 'selfregulation' => $snapshot['selfregulation'],
                 'feedbackpct' => $snapshot['feedbackpct'],
                 'cognitiveengagement' => $snapshot['engagement'],

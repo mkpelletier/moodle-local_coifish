@@ -145,7 +145,7 @@ class build_active_snapshots extends scheduled_task {
             'local_coifish_active_snapshot',
             ['courseid' => (int)$course->id],
             '',
-            'userid, id, timecomputed'
+            'userid, id, timecomputed, socialversion'
         );
 
         // Per-course "last change" signals for the staleness skip: the latest
@@ -160,6 +160,19 @@ class build_active_snapshots extends scheduled_task {
            GROUP BY userid",
             ['cid' => (int)$course->id, 'cstart' => $coursestart]
         );
+        // Live-session analytics land in BBB's own log table (after the session
+        // ends), not the logstore, so they are a separate change signal.
+        $lastlive = [];
+        if ($DB->get_manager()->table_exists('bigbluebuttonbn_logs')) {
+            $lastlive = $DB->get_records_sql_menu(
+                "SELECT l.userid, MAX(l.timecreated) AS lastts
+                   FROM {bigbluebuttonbn_logs} l
+                   JOIN {bigbluebuttonbn} b ON b.id = l.bigbluebuttonbnid
+                  WHERE b.course = :cid AND l.timecreated >= :cstart AND l.log IN ('Summary', 'Join')
+               GROUP BY l.userid",
+                ['cid' => (int)$course->id, 'cstart' => $coursestart]
+            );
+        }
         $lastgrade = $DB->get_records_sql_menu(
             "SELECT gg.userid, MAX(gg.timemodified) AS lastts
                FROM {grade_grades} gg
@@ -172,7 +185,11 @@ class build_active_snapshots extends scheduled_task {
         $skipped = 0;
         foreach ($studentids as $userid) {
             $existing = $existingbyuser[$userid] ?? null;
-            $lastchange = max((int)($lastactivity[$userid] ?? 0), (int)($lastgrade[$userid] ?? 0));
+            $lastchange = max(
+                (int)($lastactivity[$userid] ?? 0),
+                (int)($lastgrade[$userid] ?? 0),
+                (int)($lastlive[$userid] ?? 0)
+            );
             if (self::is_snapshot_fresh($existing, (int)$userid, $lastchange, $now)) {
                 $skipped++;
                 continue;
@@ -204,7 +221,7 @@ class build_active_snapshots extends scheduled_task {
      * the engagement denominator) self-heals, and is jittered by user id so the
      * forced rebuilds spread across days instead of spiking on one night.
      *
-     * @param object|null $existing Pre-loaded snapshot row (needs `timecomputed`), or null.
+     * @param object|null $existing Pre-loaded snapshot row (needs `timecomputed`, `socialversion`), or null.
      * @param int $userid Student user id (seeds the TTL jitter).
      * @param int $lastchange Latest change timestamp detected for this student.
      * @param int $now Current timestamp.
@@ -212,6 +229,10 @@ class build_active_snapshots extends scheduled_task {
      */
     protected static function is_snapshot_fresh(?object $existing, int $userid, int $lastchange, int $now): bool {
         if (!$existing) {
+            return false;
+        }
+        // A row written under an older social-presence definition is rebuilt.
+        if ((int)($existing->socialversion ?? 0) < metrics_helper::get_social_version()) {
             return false;
         }
         $computed = (int)$existing->timecomputed;
@@ -284,6 +305,7 @@ class build_active_snapshots extends scheduled_task {
             'currentgrade' => $metrics['grade'],
             'engagement' => $metrics['engagement'],
             'social' => $metrics['social'],
+            'socialversion' => $metrics['socialversion'],
             'selfregulation' => $metrics['selfregulation'],
             'feedbackpct' => $metrics['feedbackpct'],
             'coursestartdate' => (int)($course->startdate ?? 0),

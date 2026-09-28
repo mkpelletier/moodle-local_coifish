@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="local/coifish/db" VERSION="2026051300" COMMENT="CoIFish longitudinal profile tables"
+<XMLDB PATH="local/coifish/db" VERSION="2026092800" COMMENT="CoIFish longitudinal profile tables"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
 >
   <TABLES>
@@ -40,6 +40,7 @@
         <FIELD NAME="finalgrade" TYPE="number" LENGTH="7" DECIMALS="2" NOTNULL="false" SEQUENCE="false" COMMENT="Final course grade %"/>
         <FIELD NAME="engagement" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false" COMMENT="Final engagement rate 0-100"/>
         <FIELD NAME="social" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false" COMMENT="Final social presence rate 0-100"/>
+        <FIELD NAME="socialversion" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="gradereport_coifish SOCIAL_METRIC_VERSION that produced social; 0 = legacy forum-only"/>
         <FIELD NAME="selfregulation" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false" COMMENT="Final self-regulation composite 0-100"/>
         <FIELD NAME="feedbackpct" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false" COMMENT="Final feedback review %"/>
         <FIELD NAME="cognitiveengagement" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false" COMMENT="Cognitive presence / learning depth 0-100"/>
@@ -64,6 +65,7 @@
         <FIELD NAME="currentgrade" TYPE="number" LENGTH="7" DECIMALS="2" NOTNULL="false" SEQUENCE="false" COMMENT="Course grade % so far (partial)"/>
         <FIELD NAME="engagement" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="social" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="socialversion" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="gradereport_coifish SOCIAL_METRIC_VERSION that produced social; 0 = legacy forum-only"/>
         <FIELD NAME="selfregulation" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="feedbackpct" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="coursestartdate" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
@@ -98,6 +100,9 @@
         <FIELD NAME="hours_communication" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="hours_livesessions" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="hours_total" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="livesessions" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Live sessions the lecturer attended"/>
+        <FIELD NAME="livepeersessions" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Student-only live sessions in rooms the lecturer is responsible for"/>
+        <FIELD NAME="livereach" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false" COMMENT="Share (%) of the lecturer's students who joined at least one of their live sessions; null when no live sessions held"/>
         <FIELD NAME="totalinterventions" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="interventionsimproved" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="avgstudentgrade" TYPE="number" LENGTH="7" DECIMALS="2" NOTNULL="false" SEQUENCE="false" COMMENT="Avg final grade for courses that ENDED in this period (sparse)"/>
@@ -131,6 +136,10 @@
         <FIELD NAME="hours_communication" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Estimated hours on student communication"/>
         <FIELD NAME="hours_livesessions" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Estimated hours in live sessions (BBB)"/>
         <FIELD NAME="hours_total" TYPE="number" LENGTH="7" DECIMALS="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Combined total hours"/>
+        <FIELD NAME="livesessions" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Live sessions the lecturer attended"/>
+        <FIELD NAME="livepeersessions" TYPE="int" LENGTH="5" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Student-only live sessions in rooms the lecturer is responsible for"/>
+        <FIELD NAME="livereach" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false" COMMENT="Share (%) of the lecturer's students who joined at least one of their live sessions; null when no live sessions held"/>
+        <FIELD NAME="livescore" TYPE="int" LENGTH="3" NOTNULL="false" SEQUENCE="false" COMMENT="Live-teaching score 0-100; null when none of the lecturer's courses held live sessions"/>
         <FIELD NAME="strengths" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON array of strength keys"/>
         <FIELD NAME="focusareas" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON array of focus area keys"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>

@@ -66,24 +66,30 @@ final class build_active_snapshots_test extends \advanced_testcase {
      * post-dates the snapshot, or when the TTL has lapsed; skip otherwise.
      */
     public function test_staleness_predicate(): void {
+        $this->require_gradereport();
         $m = new \ReflectionMethod(build_active_snapshots::class, 'is_snapshot_fresh');
         $m->setAccessible(true);
         $now = 2000000000;
+        $v = \local_coifish\metrics_helper::get_social_version();
 
         // No existing snapshot -> must build.
         $this->assertFalse($m->invoke(null, null, 0, 0, $now));
 
         // A change landed after the snapshot was computed -> rebuild.
-        $changed = (object)['timecomputed' => $now - 100];
+        $changed = (object)['timecomputed' => $now - 100, 'socialversion' => $v];
         $this->assertFalse($m->invoke(null, $changed, 0, $now, $now));
 
         // Recent, no change, within TTL -> skip.
-        $fresh = (object)['timecomputed' => $now - DAYSECS];
+        $fresh = (object)['timecomputed' => $now - DAYSECS, 'socialversion' => $v];
         $this->assertTrue($m->invoke(null, $fresh, 0, 0, $now));
 
         // Older than the maximum jittered TTL (7 + 6 days) -> force rebuild.
-        $stale = (object)['timecomputed' => $now - 20 * DAYSECS];
+        $stale = (object)['timecomputed' => $now - 20 * DAYSECS, 'socialversion' => $v];
         $this->assertFalse($m->invoke(null, $stale, 0, 0, $now));
+
+        // Written under an older social-presence definition -> rebuild.
+        $legacy = (object)['timecomputed' => $now - DAYSECS, 'socialversion' => 0];
+        $this->assertFalse($m->invoke(null, $legacy, 0, 0, $now));
     }
 
     /**

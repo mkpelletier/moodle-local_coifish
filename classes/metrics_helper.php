@@ -59,7 +59,7 @@ class metrics_helper {
      * @param int $starttime Optional lower bound on timestamps (0 = no bound).
      * @param int|null $totalactivities Pre-computed expected activity count for the course, or null to compute it here.
      * @param array|null $discussions Pre-fetched course discussion list, or null to fetch it here.
-     * @return array ['grade' => float|null, 'engagement', 'social', 'selfregulation', 'feedbackpct']
+     * @return array ['grade' => float|null, 'engagement', 'social', 'socialversion', 'selfregulation', 'feedbackpct']
      */
     public static function capture_student_metrics(
         int $courseid,
@@ -84,16 +84,13 @@ class metrics_helper {
         }
 
         $timeclause = '';
-        $postclause = '';
         $endparams = [];
         if ($starttime > 0) {
             $timeclause .= ' AND l.timecreated >= :starttime';
-            $postclause .= ' AND fp.created >= :starttime';
             $endparams['starttime'] = $starttime;
         }
         if ($endtime > 0) {
             $timeclause .= ' AND l.timecreated <= :endtime';
-            $postclause .= ' AND fp.created <= :endtime';
             $endparams['endtime'] = $endtime;
         }
 
@@ -114,43 +111,9 @@ class metrics_helper {
         );
         $engagement = $totalactivities > 0 ? min(100, round(($engaged / $totalactivities) * 100)) : null;
 
-        // Social presence: group-aware breadth + post-volume composite. The
-        // discussion list is per-course-invariant, so the caller may pass it in
-        // to avoid one forum query per student.
-        $alldiscussions = $discussions ?? self::get_course_discussions($courseid);
-        $usergroups = groups_get_user_groups($courseid, $userid);
-        $mygroupids = $usergroups[0] ?? [];
-        $visiblediscussions = 0;
-        foreach ($alldiscussions as $disc) {
-            if ((int)$disc->groupmode === SEPARATEGROUPS) {
-                if ((int)$disc->groupid === -1 || in_array((int)$disc->groupid, $mygroupids)) {
-                    $visiblediscussions++;
-                }
-            } else {
-                $visiblediscussions++;
-            }
-        }
-        $threads = (int)$DB->count_records_sql(
-            "SELECT COUNT(DISTINCT fd.id)
-               FROM {forum_posts} fp
-               JOIN {forum_discussions} fd ON fd.id = fp.discussion
-              WHERE fd.course = :cid AND fp.userid = :uid" . $postclause,
-            array_merge(['cid' => $courseid, 'uid' => $userid], $endparams)
-        );
-        $postcount = (int)$DB->count_records_sql(
-            "SELECT COUNT(fp.id)
-               FROM {forum_posts} fp
-               JOIN {forum_discussions} fd ON fd.id = fp.discussion
-              WHERE fd.course = :cid AND fp.userid = :uid" . $postclause,
-            array_merge(['cid' => $courseid, 'uid' => $userid], $endparams)
-        );
-        $breadth = $visiblediscussions > 0
-            ? min(100, round(($threads / $visiblediscussions) * 200))
-            : ($threads > 0 ? 50 : 0);
-        $volume = min(100, round($postcount / 5 * 100));
-        $social = ($breadth > 0 || $volume > 0)
-            ? round($breadth * 0.6 + $volume * 0.4)
-            : null;
+        // Social presence: forum participation blended with live-session
+        // (BigBlueButton) interaction — see capture_social().
+        $social = self::capture_social($courseid, $userid, $endtime, $starttime, $discussions);
 
         // Feedback review percentage.
         $feedbacktimeclause = '';
@@ -196,9 +159,101 @@ class metrics_helper {
             'grade' => $grade,
             'engagement' => $engagement,
             'social' => $social,
+            'socialversion' => self::get_social_version(),
             'selfregulation' => $selfregulation,
             'feedbackpct' => $feedbackpct,
         ];
+    }
+
+    /**
+     * Version of the social-presence definition written with each snapshot:
+     * gradereport_coifish's SOCIAL_METRIC_VERSION. Rows with an older (or 0,
+     * legacy forum-only) version are recomputed by the recompute_social_snapshots task.
+     *
+     * @return int
+     */
+    public static function get_social_version(): int {
+        return \gradereport_coifish\report::SOCIAL_METRIC_VERSION;
+    }
+
+    /**
+     * A student's social-presence rate (0–100) for a course, or null when there
+     * is nothing to measure (no forum activity and no live sessions open to them).
+     *
+     * Forum participation (group-aware discussion breadth and post volume) is
+     * blended with live-session interaction using gradereport_coifish's single
+     * definition ({@see \gradereport_coifish\report::blend_live_social()}), so the
+     * longitudinal record matches the student's Community engagement widget.
+     *
+     * @param int $courseid Course ID.
+     * @param int $userid Student user ID.
+     * @param int $endtime Upper bound on timestamps (0 = now).
+     * @param int $starttime Lower bound on forum post timestamps (0 = none).
+     * @param array|null $discussions Pre-fetched course discussion list, or null to fetch it here.
+     * @return int|null
+     */
+    public static function capture_social(
+        int $courseid,
+        int $userid,
+        int $endtime = 0,
+        int $starttime = 0,
+        ?array $discussions = null
+    ): ?int {
+        global $DB;
+
+        $postclause = '';
+        $params = ['cid' => $courseid, 'uid' => $userid];
+        if ($starttime > 0) {
+            $postclause .= ' AND fp.created >= :starttime';
+            $params['starttime'] = $starttime;
+        }
+        if ($endtime > 0) {
+            $postclause .= ' AND fp.created <= :endtime';
+            $params['endtime'] = $endtime;
+        }
+
+        // The discussion list is per-course-invariant, so the caller may pass it
+        // in to avoid one forum query per student.
+        $alldiscussions = $discussions ?? self::get_course_discussions($courseid);
+        $usergroups = groups_get_user_groups($courseid, $userid);
+        $mygroupids = $usergroups[0] ?? [];
+        $visiblediscussions = 0;
+        foreach ($alldiscussions as $disc) {
+            if ((int)$disc->groupmode === SEPARATEGROUPS) {
+                if ((int)$disc->groupid === -1 || in_array((int)$disc->groupid, $mygroupids)) {
+                    $visiblediscussions++;
+                }
+            } else {
+                $visiblediscussions++;
+            }
+        }
+        $posts = $DB->get_record_sql(
+            "SELECT COUNT(DISTINCT fd.id) AS threads, COUNT(fp.id) AS posts
+               FROM {forum_posts} fp
+               JOIN {forum_discussions} fd ON fd.id = fp.discussion
+              WHERE fd.course = :cid AND fp.userid = :uid" . $postclause,
+            $params
+        );
+        $threads = (int)($posts->threads ?? 0);
+        $postcount = (int)($posts->posts ?? 0);
+        $breadth = $visiblediscussions > 0
+            ? min(100, round(($threads / $visiblediscussions) * 200))
+            : ($threads > 0 ? 50 : 0);
+        $volume = min(100, round($postcount / 5 * 100));
+        $forumsocial = ($breadth > 0 || $volume > 0) ? (int)round($breadth * 0.6 + $volume * 0.4) : null;
+
+        $analyser = \gradereport_coifish\live_sessions::for_course($courseid, $endtime);
+        $live = $analyser->get_student($userid);
+        if ($live['available'] <= 0) {
+            return $forumsocial;
+        }
+        return \gradereport_coifish\report::blend_live_social(
+            $courseid,
+            $forumsocial ?? 0,
+            $live,
+            $analyser->get_intensity(),
+            $visiblediscussions > 0 || $postcount > 0
+        );
     }
 
     /**

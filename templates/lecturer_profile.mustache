@@ -22,6 +22,10 @@
     * hasstrengths (bool) - Whether strengths exist.
     * focusareas (array) - Focus areas for improvement.
     * hasfocusareas (bool) - Whether focus areas exist.
+    * haslive (bool) - Whether the lecturer's courses held live (BigBlueButton) sessions.
+    * livesessions (int) - Live sessions the lecturer attended.
+    * livepeersessions (int) - Student-only live sessions in rooms they are responsible for.
+    * livereach (int|null) - Share (%) of their students reached by those sessions.
     * isself (bool) - Whether the viewer is the lecturer.
     * backurl (string|undefined) - URL back to lecturer list.
 
@@ -582,6 +586,9 @@
                     <div class="text-center">
                         <div class="fs-3 fw-bold text-info">{{hours_livesessions}}</div>
                         <div class="small text-muted">{{#str}}lecturer_time_livesessions, local_coifish{{/str}}</div>
+                        {{#haslive}}
+                        <div class="small text-muted">{{#str}}lecturer_live_summary, local_coifish, { "sessions": {{livesessions}}, "peer": {{livepeersessions}}, "reach": {{livereach}} } {{/str}}</div>
+                        {{/haslive}}
                         <div class="progress mt-2" style="height: 6px;">
                             <div class="progress-bar bg-info" role="progressbar"
                                  style="width: {{#hours_total}}{{#hours_livesessions}}calc({{hours_livesessions}} / {{hours_total}} * 100%){{/hours_livesessions}}{{/hours_total}}"
@@ -771,6 +778,17 @@
                     <div class="alert alert-secondary small py-2 mb-3">
                         <i class="fa fa-book me-1" aria-hidden="true"></i>
                         {{#str}}lecturer_method_forum_cite, local_coifish{{/str}}
+                    </div>
+
+                    {{! Live teaching }}
+                    <h6 class="fw-bold mt-4 mb-2">
+                        <i class="fa fa-video-camera me-1" aria-hidden="true"></i>
+                        {{#str}}lecturer_method_live_title, local_coifish{{/str}}
+                    </h6>
+                    <p class="small">{{#str}}lecturer_method_live_desc, local_coifish{{/str}}</p>
+                    <div class="alert alert-secondary small py-2 mb-3">
+                        <i class="fa fa-book me-1" aria-hidden="true"></i>
+                        {{#str}}lecturer_method_live_cite, local_coifish{{/str}}
                     </div>
 
                     {{! Student outcomes }}

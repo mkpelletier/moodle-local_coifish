@@ -60,7 +60,9 @@ class filter_helper {
             return ['', []];
         }
 
-        $cat = \core_course_category::get($categoryid, IGNORE_MISSING);
+        // Admin-configured scope: resolve it regardless of the current user's
+        // category visibility (tasks and tests may run with no user).
+        $cat = \core_course_category::get($categoryid, IGNORE_MISSING, true);
         if (!$cat) {
             return ['', []];
         }
@@ -305,7 +307,7 @@ class filter_helper {
         $catfrag = '';
         $catparams = [];
         if ($categoryid > 0) {
-            $cat = \core_course_category::get($categoryid, IGNORE_MISSING);
+            $cat = \core_course_category::get($categoryid, IGNORE_MISSING, true);
             if ($cat) {
                 $catids = array_merge([$categoryid], $cat->get_all_children_ids());
                 [$catinsql, $catparams] = $DB->get_in_or_equal($catids, SQL_PARAMS_NAMED, 'cscat');
@@ -673,7 +675,7 @@ class filter_helper {
     protected static function get_category_lecturer_ids(int $categoryid): array {
         global $DB;
 
-        $cat = \core_course_category::get($categoryid, IGNORE_MISSING);
+        $cat = \core_course_category::get($categoryid, IGNORE_MISSING, true);
         if (!$cat) {
             return [];
         }

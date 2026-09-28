@@ -159,6 +159,10 @@ class lecturer_profile implements renderable, templatable {
                 ? min(100, round($profile['avgstudentgrade']))
                 : null,
         ];
+        // Live teaching only applies where the lecturer's courses held live sessions.
+        if ($profile['livescore'] !== null) {
+            $dimensionkeys['live_teaching'] = $profile['livescore'];
+        }
 
         $component = 'local_coifish';
         foreach ($dimensionkeys as $key => $score) {
@@ -257,6 +261,7 @@ class lecturer_profile implements renderable, templatable {
             'avgforumpostspw' => ['label' => 'lecturer_dim_forum_engagement', 'unit' => '/wk', 'range' => null],
             'interventionsimproved' => ['label' => 'lecturer_dim_intervention_effectiveness', 'unit' => '', 'range' => null],
             'hours_total' => ['label' => 'lecturer_time_hours', 'unit' => 'h', 'range' => null],
+            'livereach' => ['label' => 'lecturer_live_reach', 'unit' => '%', 'range' => [0, 100]],
             'avgstudentgrade' => ['label' => 'lecturer_student_outcomes', 'unit' => '%', 'range' => [0, 100]],
         ];
 

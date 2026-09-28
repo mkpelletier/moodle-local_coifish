@@ -51,28 +51,7 @@ class lecturer_period_snapshot {
 
         $dbman = $DB->get_manager();
 
-        // Courses this lecturer holds a teaching role in, limited to the
-        // configured category scope and minus admin exclusions.
-        [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql('tr');
-        [$exclfrag, $exclparams] = \local_coifish\filter_helper::get_excluded_courses_sql('c', 'lpx');
-        [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c', 'spcat');
-        $courses = $DB->get_records_sql(
-            "SELECT DISTINCT c.id, c.startdate, c.enddate
-               FROM {role_assignments} ra
-               JOIN {context} ctx ON ctx.id = ra.contextid AND ctx.contextlevel = :ctxlevel
-               JOIN {course} c ON c.id = ctx.instanceid
-              WHERE ra.userid = :uid
-                AND ra.roleid $trinsql
-                AND c.id != :siteid
-                $exclfrag
-                $catfrag",
-            array_merge(
-                ['ctxlevel' => CONTEXT_COURSE, 'uid' => $userid, 'siteid' => SITEID],
-                $trparams,
-                $exclparams,
-                $catparams
-            )
-        );
+        $courses = self::get_lecturer_courses($userid);
 
         if (empty($courses)) {
             return false;
@@ -216,6 +195,9 @@ class lecturer_period_snapshot {
             'hours_communication' => $hours['communication'],
             'hours_livesessions' => $hours['livesessions'],
             'hours_total' => $hours['total'],
+            'livesessions' => $hours['live']['sessions'] ?? 0,
+            'livepeersessions' => $hours['live']['peersessions'] ?? 0,
+            'livereach' => $hours['live']['reach'] ?? null,
             'totalinterventions' => $totalintv,
             'interventionsimproved' => $intvimproved,
             'avgstudentgrade' => $avgstudentgrade,
@@ -235,6 +217,70 @@ class lecturer_period_snapshot {
         }
 
         return true;
+    }
+
+    /**
+     * Courses a lecturer holds a teaching role in, limited to the configured
+     * category scope and minus admin exclusions.
+     *
+     * @param int $userid Lecturer user ID.
+     * @return array Course rows (id, startdate, enddate) keyed by id.
+     */
+    protected static function get_lecturer_courses(int $userid): array {
+        global $DB;
+
+        [$trinsql, $trparams] = \local_coifish\filter_helper::get_teacher_role_sql('tr');
+        [$exclfrag, $exclparams] = \local_coifish\filter_helper::get_excluded_courses_sql('c', 'lpx');
+        [$catfrag, $catparams] = \local_coifish\filter_helper::get_category_scope_sql('c', 'spcat');
+        $courses = $DB->get_records_sql(
+            "SELECT DISTINCT c.id, c.startdate, c.enddate
+               FROM {role_assignments} ra
+               JOIN {context} ctx ON ctx.id = ra.contextid AND ctx.contextlevel = :ctxlevel
+               JOIN {course} c ON c.id = ctx.instanceid
+              WHERE ra.userid = :uid
+                AND ra.roleid $trinsql
+                AND c.id != :siteid
+                $exclfrag
+                $catfrag",
+            array_merge(
+                ['ctxlevel' => CONTEXT_COURSE, 'uid' => $userid, 'siteid' => SITEID],
+                $trparams,
+                $exclparams,
+                $catparams
+            )
+        );
+        return $courses;
+    }
+
+    /**
+     * Recompute only the live-session fields of an existing weekly snapshot
+     * (live hours, sessions, reach) and its hours total, leaving every other
+     * metric as recorded. Used when the live-session definition changes.
+     *
+     * @param object $row A local_coifish_lecturer_period_snapshot row.
+     */
+    public static function refresh_live(object $row): void {
+        global $DB;
+
+        $courseids = array_keys(self::get_lecturer_courses((int)$row->userid));
+        $live = \local_coifish\lecturer_api::get_live_teaching(
+            (int)$row->userid,
+            $courseids,
+            (int)$row->periodstart,
+            (int)$row->periodend
+        );
+        $livehours = $live ? round($live['minutes'] / 60, 1) : 0.0;
+        $prepmultiplier = (int)(get_config('local_coifish', 'prep_multiplier') ?? 2);
+        $livetotal = round($livehours * (1 + $prepmultiplier), 1);
+
+        $DB->update_record('local_coifish_lecturer_period_snapshot', (object)[
+            'id' => $row->id,
+            'hours_livesessions' => $livetotal,
+            'hours_total' => round((float)$row->hours_marking + (float)$row->hours_communication + $livetotal, 1),
+            'livesessions' => $live['sessions'] ?? 0,
+            'livepeersessions' => $live['peersessions'] ?? 0,
+            'livereach' => $live['reach'] ?? null,
+        ]);
     }
 
     /**

@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.8.0] - 2026-09-28
+
+Requires gradereport_coifish 2.12.0 (now a declared dependency).
+
+### Added
+- **Social presence includes live-session (BigBlueButton) interaction.** Course and in-progress snapshots now compute social presence with gradereport_coifish's shared definition (`report::blend_live_social()`): forum participation blended with live-session interaction (sessions attended out of those open to the student, credited for a fair share of the conversation, peer-only sessions weighted extra). In a course with no forum discussions the live rate stands alone. A student has no social value only when they had neither forum activity nor live sessions open to them. The logic lives in the new `metrics_helper::capture_social()`.
+- **Historical recompute.** Snapshots record the social-presence definition that produced them (new `socialversion` column; 0 = legacy forum-only). The upgrade queues a time-boxed ad-hoc task, `recompute_social_snapshots`, that recalculates **only** the `social` value of completed-course snapshots from the retained forum and BBB data (grades and other metrics untouched), then refreshes the live-session fields of weekly lecturer snapshots. Student profiles (trends and the social-isolation risk flag) re-aggregate on the next nightly run. In-progress snapshots on an older definition are rebuilt by the daily task.
+- **Live teaching on the lecturer profile.** A new "Live teaching" dimension (60% session frequency, 40% reach) joins the strengths and focus areas. Sessions the lecturer attended count in full; student-only sessions (e.g. role-plays) in rooms they are responsible for count at the report plugin's peer credit (default half). Reach is the share of their students who joined at least one. The dimension is omitted for lecturers whose courses held no live sessions. Session count and reach are stored on the profile and weekly snapshots (`livesessions`, `livepeersessions`, `livereach`, `livescore`) and shown on the profile with a reach sparkline.
+
+### Changed
+- **Live-session hours are the lecturer's own time** in sessions they attended within the period, from BBB's meeting analytics, plus the existing preparation multiplier. The previous estimate summed every recording in the lecturer's courses regardless of who ran the session or when.
+- The daily in-progress snapshot refresh now also wakes up on new BBB analytics, which arrive in BBB's own log table rather than the logstore.
+- CI installs `gradereport_coifish` alongside this plugin (`moodle-plugin-ci add-plugin`).
+
+### Fixed
+- **Category scope was ignored on Moodle 5.3.** `core_course_category::get()` hides categories from a context without a logged-in user, so the admin-configured `course_category` scope silently fell away in tests (and any no-user context). Category lookups now resolve the configured scope regardless of the current user's category visibility.
+
 ## [1.7.0] - 2026-06-18
 
 ### Changed

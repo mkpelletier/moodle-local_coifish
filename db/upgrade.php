@@ -181,5 +181,40 @@ function xmldb_local_coifish_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026060900, 'local', 'coifish');
     }
 
+    if ($oldversion < 2026092800) {
+        // Social presence now includes live-session (BigBlueButton) interaction:
+        // record which definition produced each snapshot (0 = legacy forum-only).
+        foreach (['local_coifish_course_snapshot', 'local_coifish_active_snapshot'] as $tablename) {
+            $table = new xmldb_table($tablename);
+            $field = new xmldb_field('socialversion', XMLDB_TYPE_INTEGER, '4', null, XMLDB_NOTNULL, null, '0', 'social');
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        // Live-teaching metrics on lecturer profiles and weekly snapshots.
+        foreach (['local_coifish_lecturer_period_snapshot', 'local_coifish_lecturer'] as $tablename) {
+            $table = new xmldb_table($tablename);
+            $fields = [
+                new xmldb_field('livesessions', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0', 'hours_total'),
+                new xmldb_field('livepeersessions', XMLDB_TYPE_INTEGER, '5', null, XMLDB_NOTNULL, null, '0', 'livesessions'),
+                new xmldb_field('livereach', XMLDB_TYPE_INTEGER, '3', null, null, null, null, 'livepeersessions'),
+            ];
+            if ($tablename === 'local_coifish_lecturer') {
+                $fields[] = new xmldb_field('livescore', XMLDB_TYPE_INTEGER, '3', null, null, null, null, 'livereach');
+            }
+            foreach ($fields as $field) {
+                if (!$dbman->field_exists($table, $field)) {
+                    $dbman->add_field($table, $field);
+                }
+            }
+        }
+
+        // Recompute historical social scores and lecturer live metrics in the background.
+        \core\task\manager::queue_adhoc_task(new \local_coifish\task\recompute_social_snapshots(), true);
+
+        upgrade_plugin_savepoint(true, 2026092800, 'local', 'coifish');
+    }
+
     return true;
 }

@@ -25,7 +25,11 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_coifish';
-$plugin->version   = 2026061800;
-$plugin->release   = '1.7.0';
+$plugin->version   = 2026092800;
+$plugin->release   = '1.8.0';
 $plugin->requires  = 2024110400; // Moodle 5.0+.
 $plugin->maturity  = MATURITY_BETA;
+$plugin->dependencies = [
+    // Live-session analytics and the shared social-presence definition.
+    'gradereport_coifish' => 2026092801,
+];
