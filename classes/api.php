@@ -77,7 +77,7 @@ class api {
         }
 
         $context = \context_course::instance($courseid);
-        $students = get_enrolled_users($context, 'moodle/course:isincompletionreports', 0, 'u.id');
+        $students = get_enrolled_users($context, 'moodle/course:isincompletionreports', 0, 'u.id', null, 0, 0, true);
         if (empty($students)) {
             return [];
         }

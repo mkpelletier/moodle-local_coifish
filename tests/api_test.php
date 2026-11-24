@@ -284,4 +284,46 @@ final class api_test extends \advanced_testcase {
         // Should have recommendations for each risk factor.
         $this->assertGreaterThanOrEqual(4, count($result['recommendations']));
     }
+
+    /**
+     * Students who withdrew (suspended enrolment) are not listed as early warnings:
+     * it is too late for preventative action and would mislead the teacher.
+     */
+    public function test_early_warnings_exclude_withdrawn_students(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $gen = $this->getDataGenerator();
+        $course = $gen->create_course();
+        $active = $gen->create_user();
+        $withdrawn = $gen->create_user();
+        $gen->enrol_user($active->id, $course->id, 'student');
+        $gen->enrol_user($withdrawn->id, $course->id, 'student', 'manual', 0, 0, ENROL_USER_SUSPENDED);
+
+        foreach ([$active, $withdrawn] as $user) {
+            $DB->insert_record('local_coifish_profile', (object)[
+                'userid' => $user->id,
+                'coursescompleted' => 2,
+                'coursesinprogress' => 1,
+                'avggrade' => 40,
+                'gradetrend' => 'declining',
+                'engagementpattern' => 'irregular',
+                'avgsocial' => 10,
+                'socialtrend' => 'declining',
+                'avgselfregulation' => 20,
+                'selfregtrend' => 'declining',
+                'avgfeedbackpct' => 10,
+                'totalinterventions' => 0,
+                'interventionsimproved' => 0,
+                'interventionresponse' => 'none',
+                'risklevel' => 'high',
+                'riskfactors' => json_encode(['declining_grades']),
+                'timemodified' => time(),
+            ]);
+        }
+
+        $userids = array_column(api::get_early_warnings($course->id), 'userid');
+        $this->assertContains((int)$active->id, array_map('intval', $userids));
+        $this->assertNotContains((int)$withdrawn->id, array_map('intval', $userids));
+    }
 }

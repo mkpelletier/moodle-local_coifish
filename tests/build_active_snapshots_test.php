@@ -136,4 +136,30 @@ final class build_active_snapshots_test extends \advanced_testcase {
         $after = (int)$DB->get_field('local_coifish_active_snapshot', 'timecomputed', ['id' => $snap->id]);
         $this->assertGreaterThan($old, $after);
     }
+
+    /**
+     * A student whose enrolment is suspended (withdrawn) loses their active
+     * snapshot on the next run, so they drop out of live risk views.
+     */
+    public function test_task_removes_withdrawn_students(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->require_gradereport();
+        [$course, $student] = $this->make_course_with_student();
+        $peer = $this->getDataGenerator()->create_user();
+        $this->getDataGenerator()->enrol_user($peer->id, $course->id, 'student');
+
+        $this->run_task();
+        $this->assertTrue($DB->record_exists('local_coifish_active_snapshot',
+            ['courseid' => $course->id, 'userid' => $student->id]));
+
+        $instance = $DB->get_record('enrol', ['courseid' => $course->id, 'enrol' => 'manual'], '*', MUST_EXIST);
+        enrol_get_plugin('manual')->update_user_enrol($instance, $student->id, ENROL_USER_SUSPENDED);
+
+        $this->run_task();
+        $this->assertFalse($DB->record_exists('local_coifish_active_snapshot',
+            ['courseid' => $course->id, 'userid' => $student->id]));
+        $this->assertTrue($DB->record_exists('local_coifish_active_snapshot',
+            ['courseid' => $course->id, 'userid' => $peer->id]));
+    }
 }

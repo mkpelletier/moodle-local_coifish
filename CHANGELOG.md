@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.8.1] - 2026-11-24
+
+### Fixed
+- **Withdrawn students no longer appear in the grade report's Early warning table.** `api::get_early_warnings()` listed every enrolled student with a moderate or high risk profile, including those whose enrolment had been suspended or had expired, so a student who dropped the course still looked like someone needing preventative action. It now considers active enrolments only, matching the rest of gradereport_coifish.
+- **Active snapshots are removed when a student withdraws.** The daily `build_active_snapshots` task meant to delete snapshot rows for students no longer actively enrolled, but its enrolment query still returned suspended students, so their in-progress snapshots were never cleared. Completed-course snapshots (`build_profiles`) still include withdrawn students, since a withdrawal is part of their history.
+
 ## [1.8.0] - 2026-09-28
 
 Requires gradereport_coifish 2.12.0 (now a declared dependency).

@@ -110,7 +110,7 @@ class build_active_snapshots extends scheduled_task {
             return ['refreshed' => 0, 'skipped' => 0];
         }
 
-        $students = get_enrolled_users($context, 'moodle/course:isincompletionreports', 0, 'u.id');
+        $students = get_enrolled_users($context, 'moodle/course:isincompletionreports', 0, 'u.id', null, 0, 0, true);
         $studentids = array_keys($students);
 
         // Remove snapshot rows for users no longer actively enrolled in this course.
