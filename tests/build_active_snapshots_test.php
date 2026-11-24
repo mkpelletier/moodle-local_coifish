@@ -150,16 +150,15 @@ final class build_active_snapshots_test extends \advanced_testcase {
         $this->getDataGenerator()->enrol_user($peer->id, $course->id, 'student');
 
         $this->run_task();
-        $this->assertTrue($DB->record_exists('local_coifish_active_snapshot',
-            ['courseid' => $course->id, 'userid' => $student->id]));
+        $studentrow = ['courseid' => $course->id, 'userid' => $student->id];
+        $this->assertTrue($DB->record_exists('local_coifish_active_snapshot', $studentrow));
 
         $instance = $DB->get_record('enrol', ['courseid' => $course->id, 'enrol' => 'manual'], '*', MUST_EXIST);
         enrol_get_plugin('manual')->update_user_enrol($instance, $student->id, ENROL_USER_SUSPENDED);
 
         $this->run_task();
-        $this->assertFalse($DB->record_exists('local_coifish_active_snapshot',
-            ['courseid' => $course->id, 'userid' => $student->id]));
-        $this->assertTrue($DB->record_exists('local_coifish_active_snapshot',
-            ['courseid' => $course->id, 'userid' => $peer->id]));
+        $peerrow = ['courseid' => $course->id, 'userid' => $peer->id];
+        $this->assertFalse($DB->record_exists('local_coifish_active_snapshot', $studentrow));
+        $this->assertTrue($DB->record_exists('local_coifish_active_snapshot', $peerrow));
     }
 }
